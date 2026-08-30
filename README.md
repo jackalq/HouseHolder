@@ -1,80 +1,70 @@
-# Family Butler
+# HouseHolder
 
-Privacy-first household assistant for Android and iOS with an on-device Llama 3.2 3B Instruct model.
+Privacy-first household butler. The first executable MVP targets **Android** and uses Flutter for the shared application/domain layer.
 
-## Goals
+## First MVP goal
 
-- Store and query children's class schedules.
-- Track shopping items and household todo items.
-- Let two family members share the same household state.
-- Keep ordinary household data usable offline.
-- Run the assistant locally on-device where practical.
-- Add shopping comparison/cart integrations through explicit provider adapters.
-
-## Recommended stack
-
-- UI: Flutter
-- Local LLM: PyTorch ExecuTorch + Llama 3.2 3B Instruct, quantized for mobile
-- Local data: SQLite (production adapter)
-- Sync: encrypted household document/event log in a shared Google Drive folder
-- Shopping: provider interface; search/compare/cart actions require explicit user confirmation
-
-## Repository status
-
-This is an MVP starter/scaffold. It includes:
-- Flutter domain/UI starter
-- a platform-channel contract for local LLM inference
-- Android Kotlin ExecuTorch adapter example
-- iOS Swift ExecuTorch adapter example
-- family data schema
-- Google Drive sync design
-- shopping provider design
-- export notes for generating the mobile `.pte` model
-
-The large model files are intentionally NOT committed to Git. Keep them under `model/` locally or download/install them as an app model pack.
-
-## Architecture
+The first vertical slice is deliberately narrow and testable:
 
 ```text
-Flutter UI
-   |
-   +-- FamilyRepository -------- SQLite / local JSON
-   |
-   +-- AssistantOrchestrator
-   |      |
-   |      +-- LocalLlamaGateway -- Flutter MethodChannel
-   |                                   |
-   |                       +-----------+-----------+
-   |                       |                       |
-   |                 Android/Kotlin           iOS/Swift
-   |                 ExecuTorch LLM          ExecuTorchLLM
-   |
-   +-- SyncProvider ---------- Google Drive shared folder
-   |
-   +-- ShoppingProvider ------ retailer/search adapters
+Android phone
+  -> photograph school timetable
+  -> on-device OCR
+  -> timetable preview/correction
+  -> local Llama 3.2 3B proposes ScheduleItems
+  -> schema validation + user confirmation
+  -> hierarchical JSON repository
+  -> ask: "明天小孩有什麼課？"
+  -> answer from household data
 ```
 
-## Important model note
+Voice and text enter the same assistant pipeline. Shopping and todo actions use the same typed FamilyAction boundary.
 
-Llama 3.2 3B is suitable for mobile only after quantization and device-specific validation. Treat the model as an installable local model pack rather than placing multi-GB weights directly in source control.
+## Architecture rules
 
-## MVP assistant commands
+- **Model proposes; application decides.** The model never directly mutates household files, Drive data, credentials, carts or payments.
+- Household persistence is a **hierarchical JSON document store**, not a shared SQLite database.
+- Summary/index documents are separated from details and can be rebuilt.
+- Changes become **append-only per-device events**.
+- Canonical JSON + hashes/baseHash provide optimistic concurrency.
+- Merge order is deterministic merge first, then an LLM semantic *proposal* only for unresolved ambiguity.
+- Skills and Formats are declarative/versioned so Butler capabilities can expand without rewriting the orchestrator.
 
-Examples:
-- `明天小孩有什麼課？`
-- `星期三幾點要上英文？`
-- `幫我記得買牛奶、雞蛋和衛生紙`
-- `新增待辦：星期五繳學費`
-- `列出還沒買的東西`
-- `把買牛奶標記完成`
+## Android-first stack
 
-For household state mutation, the LLM should produce a structured action. The application validates and applies the action; the model never writes storage directly.
+- UI/application: Flutter
+- Local LLM: PyTorch ExecuTorch + quantized Llama 3.2 3B Instruct
+- OCR: Android on-device adapter through `householder/ocr`
+- Speech: Android speech-to-text adapter through `householder/speech`
+- Local data: hierarchical JSON/JSONL files
+- Sync: encrypted append-only household events over Google Drive (later MVP milestone)
+- Shopping: web/provider adapters + deterministic basket optimizer
 
-## Next implementation steps
+Large model files are intentionally not committed to Git. Treat the `.pte` model and tokenizer as an installable model pack.
 
-1. Create the Flutter project shell (`flutter create .`) and merge `lib/`.
-2. Add the current ExecuTorch Android/iOS runtime dependencies.
-3. Export/quantize Llama 3.2 3B Instruct to `.pte`.
-4. Replace `MemoryFamilyRepository` with SQLite.
-5. Implement Google sign-in + Drive shared-folder sync.
-6. Implement retailer-specific shopping providers only where API/terms permit.
+## Current code
+
+- `lib/main.dart` — Android-first Flutter home shell.
+- `lib/assistant/local_llama_gateway.dart` — local LLM platform-channel contract.
+- `lib/assistant/assistant_orchestrator.dart` — common text/speech/image-OCR entry point.
+- `lib/platform/ocr_gateway.dart` — OCR document/block contract including bounds.
+- `lib/platform/speech_gateway.dart` — speech recognition contract with on-device capability check.
+- `lib/storage/json_repository.dart` — hierarchical JSON + JSONL document repository.
+- `lib/storage/canonical_json.dart` — stable canonical representation for hashing.
+- `lib/storage/change_event.dart` — append-only change event model.
+- `lib/skills/skill_definition.dart` — declarative Skill registry contract.
+- `formats/` and `skills/` — versioned Format/Skill definitions.
+- `docs/MVP_PLAN.md` — Android MVP milestones and acceptance target.
+
+## MVP sequence
+
+1. Complete Android Flutter platform shell.
+2. Wire Android OCR and image selection/camera input.
+3. Build timetable import preview + validation.
+4. Persist confirmed schedule data in hierarchical JSON.
+5. Wire local Llama through ExecuTorch and structured FamilyActions.
+6. Add Android speech input.
+7. Add per-device event log + merge engine.
+8. Add Google Drive transport.
+9. Add shopping search/normalization/basket optimization.
+10. Port shared layers to iOS after the Android slice is validated.
