@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "householder://formats/shopping-item/v1",
+  "title": "HouseHolder Shopping Item",
+  "type": "object",
+  "required": ["id", "name", "quantity", "unit", "done"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "name": {"type": "string", "minLength": 1},
+    "quantity": {"type": "integer", "minimum": 1},
+    "unit": {"type": "string", "minLength": 1},
+    "done": {"type": "boolean"},
+    "note": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
