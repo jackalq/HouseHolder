@@ -70,7 +70,7 @@ void main() {
     expect(result.message, contains('第 2 節'));
   });
 
-  test('shopping add/list/update persists through append-only records', () async {
+  test('shopping completion resolves persisted item by name', () async {
     await executor.execute(
       const FamilyAction(
         type: 'shopping.add',
@@ -96,7 +96,7 @@ void main() {
       const FamilyAction(
         type: 'shopping.setDone',
         requiresConfirmation: false,
-        payload: {'id': 'milk-1', 'done': true},
+        payload: {'name': '牛奶', 'done': true},
       ),
     );
     result = await executor.execute(
@@ -109,7 +109,7 @@ void main() {
     expect(result.message, contains('目前沒有購物項目'));
   });
 
-  test('todo add/list persists due date', () async {
+  test('todo completion resolves persisted todo by title', () async {
     await executor.execute(
       const FamilyAction(
         type: 'todo.add',
@@ -127,7 +127,7 @@ void main() {
       ),
     );
 
-    final result = await executor.execute(
+    var result = await executor.execute(
       const FamilyAction(
         type: 'todo.list',
         requiresConfirmation: false,
@@ -136,6 +136,48 @@ void main() {
     );
     expect(result.message, contains('繳學費'));
     expect(result.message, contains('2026-09-04'));
+
+    await executor.execute(
+      const FamilyAction(
+        type: 'todo.setDone',
+        requiresConfirmation: false,
+        payload: {'title': '繳學費', 'done': true},
+      ),
+    );
+    result = await executor.execute(
+      const FamilyAction(
+        type: 'todo.list',
+        requiresConfirmation: false,
+        payload: {'includeDone': false},
+      ),
+    );
+    expect(result.message, contains('目前沒有待辦'));
+  });
+
+  test('ambiguous shopping name is rejected instead of guessing', () async {
+    await executor.execute(
+      const FamilyAction(
+        type: 'shopping.add',
+        requiresConfirmation: false,
+        payload: {
+          'items': [
+            {'id': 'milk-a', 'name': '牛奶', 'quantity': 1, 'unit': '瓶', 'done': false},
+            {'id': 'milk-b', 'name': '牛奶', 'quantity': 2, 'unit': '瓶', 'done': false}
+          ]
+        },
+      ),
+    );
+
+    expect(
+      () => executor.execute(
+        const FamilyAction(
+          type: 'shopping.setDone',
+          requiresConfirmation: false,
+          payload: {'name': '牛奶', 'done': true},
+        ),
+      ),
+      throwsA(isA<StateError>()),
+    );
   });
 
   test('schedule import cannot bypass confirmation flag', () async {
