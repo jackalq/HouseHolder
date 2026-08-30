@@ -208,7 +208,7 @@ class _ScheduleItemEditorState extends State<_ScheduleItemEditor> {
               TextField(controller: _child, decoration: const InputDecoration(labelText: '孩子 ID / 名稱')),
               TextField(controller: _subject, decoration: const InputDecoration(labelText: '科目')),
               DropdownButtonFormField<int>(
-                value: _weekday,
+                initialValue: _weekday,
                 decoration: const InputDecoration(labelText: '星期'),
                 items: List.generate(
                   7,
