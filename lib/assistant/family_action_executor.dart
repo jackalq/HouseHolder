@@ -1,3 +1,4 @@
+import '../domain/entity_ids.dart';
 import '../features/schedule/schedule_import_models.dart';
 import '../features/schedule/schedule_repository.dart';
 import '../features/shopping/shopping_item.dart';
@@ -59,7 +60,23 @@ class FamilyActionExecutor {
     if (!action.requiresConfirmation) {
       throw const FormatException('schedule.import must require confirmation.');
     }
-    final draft = ScheduleImportDraft.fromPayload(action.payload);
+    final rawItems = action.payload['items'];
+    if (rawItems is! List || rawItems.isEmpty) {
+      throw const FormatException('schedule.import payload.items is required.');
+    }
+    final normalizedPayload = <String, Object?>{
+      ...action.payload,
+      'items': rawItems.map((raw) {
+        if (raw is! Map) {
+          throw const FormatException('Each schedule item must be an object.');
+        }
+        return <String, Object?>{
+          ...raw.map((key, value) => MapEntry(key.toString(), value)),
+          'id': EntityIds.generate('schedule'),
+        };
+      }).toList(growable: false),
+    };
+    final draft = ScheduleImportDraft.fromPayload(normalizedPayload);
     return ActionExecutionResult(
       message: '課表草稿已驗證，等待確認。',
       scheduleDraft: draft,
@@ -98,9 +115,11 @@ class FamilyActionExecutor {
     var count = 0;
     for (final raw in rawItems) {
       if (raw is! Map) throw const FormatException('shopping.add items must be objects.');
-      final item = HouseholdShoppingItem.fromJson(
-        raw.map((key, value) => MapEntry(key.toString(), value)),
-      );
+      final normalized = <String, Object?>{
+        ...raw.map((key, value) => MapEntry(key.toString(), value)),
+        'id': EntityIds.generate('shopping'),
+      };
+      final item = HouseholdShoppingItem.fromJson(normalized);
       await _shopping.add(item);
       count++;
     }
@@ -148,9 +167,11 @@ class FamilyActionExecutor {
     var count = 0;
     for (final raw in rawItems) {
       if (raw is! Map) throw const FormatException('todo.add items must be objects.');
-      final item = HouseholdTodoItem.fromJson(
-        raw.map((key, value) => MapEntry(key.toString(), value)),
-      );
+      final normalized = <String, Object?>{
+        ...raw.map((key, value) => MapEntry(key.toString(), value)),
+        'id': EntityIds.generate('todo'),
+      };
+      final item = HouseholdTodoItem.fromJson(normalized);
       await _todos.add(item);
       count++;
     }
