@@ -19,7 +19,6 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -45,8 +44,4 @@ dependencies {
 
     // Pin to ExecuTorch 1.3.x while validating the Android LLM Java API.
     implementation("org.pytorch:executorch-android:1.3.1")
-
-    // Current stable AndroidX Test artifacts, used only by the opt-in LLM E2E smoke test.
-    androidTestImplementation("androidx.test:runner:1.7.0")
-    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
