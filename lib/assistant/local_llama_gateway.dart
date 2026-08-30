@@ -50,5 +50,19 @@ class LocalLlamaGateway {
     return LocalModelStatus.fromMap(result);
   }
 
+  Future<bool> pickModelFile() async =>
+      (await _channel.invokeMethod<bool>('pickModelFile')) ?? false;
+
+  Future<bool> pickTokenizerFile() async =>
+      (await _channel.invokeMethod<bool>('pickTokenizerFile')) ?? false;
+
+  Future<LocalModelStatus> deleteModelPack() async {
+    final result = await _channel.invokeMapMethod<Object?, Object?>('deleteModelPack');
+    if (result == null) {
+      throw StateError('Android Llama runtime returned no model status after deletion.');
+    }
+    return LocalModelStatus.fromMap(result);
+  }
+
   Future<void> stop() => _channel.invokeMethod<void>('stop');
 }
