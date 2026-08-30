@@ -22,6 +22,11 @@ class LocalLlamaEngine(context: Context) {
             RecommendedModelPackDownloader.TOKENIZER_FILE,
             "tokenizer.bin",
         )
+        private val OUTPUT_CONTROL_TOKENS = listOf(
+            "<|eot_id|>",
+            "<|end_of_text|>",
+            "<|eom_id|>",
+        )
     }
 
     private val appContext = context.applicationContext
@@ -106,7 +111,8 @@ class LocalLlamaEngine(context: Context) {
                     override fun onStats(statsJson: String) {
                         if (finished.compareAndSet(false, true)) {
                             generating = false
-                            mainHandler.post { onSuccess(output.toString()) }
+                            val cleanOutput = sanitizeGeneratedText(output.toString())
+                            mainHandler.post { onSuccess(cleanOutput) }
                         }
                     }
 
@@ -129,6 +135,14 @@ class LocalLlamaEngine(context: Context) {
                 }
             }
         }
+    }
+
+    private fun sanitizeGeneratedText(raw: String): String {
+        var result = raw
+        for (token in OUTPUT_CONTROL_TOKENS) {
+            result = result.replace(token, "")
+        }
+        return result.trim()
     }
 
     @Synchronized
