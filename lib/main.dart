@@ -1,21 +1,16 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
+import 'app_services.dart';
 import 'assistant/assistant_orchestrator.dart';
 import 'assistant/family_action.dart';
 import 'assistant/local_llama_gateway.dart';
-import 'features/schedule/schedule_import_models.dart';
 import 'features/schedule/schedule_preview_page.dart';
-import 'features/schedule/schedule_repository.dart';
 import 'features/schedule/timetable_import_page.dart';
 import 'platform/ocr_gateway.dart';
 import 'platform/speech_gateway.dart';
-import 'storage/device_identity.dart';
-import 'storage/json_repository.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const HouseHolderApp());
 }
 
@@ -43,13 +38,24 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _controller = TextEditingController();
   final _speech = SpeechGateway();
-  final _assistant = AssistantOrchestrator(LocalLlamaGateway());
+  final _llama = LocalLlamaGateway();
   final _actionParser = const FamilyActionParser();
+
+  late final AssistantOrchestrator _assistant = AssistantOrchestrator(_llama);
+  late final Future<AppServices> _servicesFuture;
+  late Future<LocalModelStatus> _modelStatusFuture;
 
   bool _listening = false;
   bool _thinking = false;
   String? _status;
   String? _lastDraft;
+
+  @override
+  void initState() {
+    super.initState();
+    _servicesFuture = AppServices.bootstrap();
+    _modelStatusFuture = _llama.modelStatus();
+  }
 
   @override
   void dispose() {
@@ -67,13 +73,13 @@ class _HomePageState extends State<HomePage> {
     await _propose(
       ImageAssistantInput(
         ocr: document,
-        context: '這是一張家庭成員的學校課表。請使用 schedule-import skill 產生草稿。',
+        context: '這是一張家庭成員的學校課表。請產生 schedule.import 草稿。',
       ),
     );
   }
 
   Future<void> _recognizeSpeech() async {
-    if (_listening) return;
+    if (_listening || _thinking) return;
     setState(() {
       _listening = true;
       _status = '正在聽…';
@@ -111,7 +117,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _thinking = true;
       _lastDraft = null;
-      _status = '管家正在產生結構化草稿…';
+      _status = '管家正在產生結構化動作…';
     });
 
     try {
@@ -121,7 +127,7 @@ class _HomePageState extends State<HomePage> {
       await _handleDraft(draft.rawJson);
     } catch (error) {
       if (!mounted) return;
-      setState(() => _status = '本機 Llama 尚未就緒或推論失敗：$error');
+      setState(() => _status = '處理失敗：$error');
     } finally {
       if (mounted) setState(() => _thinking = false);
     }
@@ -129,21 +135,15 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _handleDraft(String rawJson) async {
     final action = _actionParser.parse(rawJson);
+    final services = await _servicesFuture;
+    final result = await services.actions.execute(action);
+    if (!mounted) return;
 
-    if (action.type != 'schedule.import') {
-      if (!mounted) return;
-      setState(() {
-        _status = '已驗證 FamilyAction：${action.type}。目前 MVP 先完成 schedule.import 寫入流程。';
-      });
+    final scheduleDraft = result.scheduleDraft;
+    if (scheduleDraft == null) {
+      setState(() => _status = result.message);
       return;
     }
-
-    if (!action.requiresConfirmation) {
-      throw const FormatException('schedule.import must require confirmation.');
-    }
-
-    final scheduleDraft = ScheduleImportDraft.fromPayload(action.payload);
-    if (!mounted) return;
 
     final confirmed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -151,33 +151,68 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (!mounted) return;
-
     if (confirmed != true) {
       setState(() => _status = '課表草稿已取消，沒有寫入家庭資料。');
       return;
     }
 
-    setState(() => _status = '正在寫入本機家庭資料與變更事件…');
-    final appDocuments = await getApplicationDocumentsDirectory();
-    final documents = JsonDocumentRepository(
-      Directory('${appDocuments.path}/HouseHolder'),
-    );
-    final repository = ScheduleRepository(
-      documents: documents,
-      deviceIdentity: DeviceIdentity(documents),
-    );
-    await repository.importConfirmed(scheduleDraft);
-
+    setState(() => _status = '正在寫入課表與 ChangeEvent…');
+    await services.schedules.importConfirmed(scheduleDraft);
     if (!mounted) return;
     setState(() {
-      _status = '課表已確認並寫入 ${scheduleDraft.items.length} 筆；ChangeEvent 也已建立。';
+      _status = '課表已寫入 ${scheduleDraft.items.length} 筆；之後可直接詢問明天有什麼課。';
     });
+  }
+
+  Future<void> _showShopping() async {
+    try {
+      final services = await _servicesFuture;
+      final result = await services.actions.execute(
+        const FamilyAction(
+          type: 'shopping.list',
+          requiresConfirmation: false,
+          payload: {'includeDone': true},
+        ),
+      );
+      if (mounted) setState(() => _status = result.message);
+    } catch (error) {
+      if (mounted) setState(() => _status = '讀取購物清單失敗：$error');
+    }
+  }
+
+  Future<void> _showTodos() async {
+    try {
+      final services = await _servicesFuture;
+      final result = await services.actions.execute(
+        const FamilyAction(
+          type: 'todo.list',
+          requiresConfirmation: false,
+          payload: {'includeDone': true},
+        ),
+      );
+      if (mounted) setState(() => _status = result.message);
+    } catch (error) {
+      if (mounted) setState(() => _status = '讀取待辦失敗：$error');
+    }
+  }
+
+  void _refreshModelStatus() {
+    setState(() => _modelStatusFuture = _llama.modelStatus());
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('HouseHolder')),
+      appBar: AppBar(
+        title: const Text('HouseHolder'),
+        actions: [
+          IconButton(
+            tooltip: '重新檢查本機模型',
+            onPressed: _refreshModelStatus,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -190,7 +225,9 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 8),
               const Text('Android MVP：課表、語音、購物與待辦。'),
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
+              _ModelStatusCard(status: _modelStatusFuture),
+              const SizedBox(height: 16),
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
@@ -206,12 +243,12 @@ class _HomePageState extends State<HomePage> {
                     label: Text(_listening ? '辨識中…' : '語音'),
                   ),
                   FilledButton.tonalIcon(
-                    onPressed: () => setState(() => _status = '購物清單功能下一步接 JSON Repository。'),
+                    onPressed: _showShopping,
                     icon: const Icon(Icons.shopping_cart_outlined),
                     label: const Text('購物清單'),
                   ),
                   FilledButton.tonalIcon(
-                    onPressed: () => setState(() => _status = '待辦功能下一步接 JSON Repository。'),
+                    onPressed: _showTodos,
                     icon: const Icon(Icons.checklist_outlined),
                     label: const Text('待辦'),
                   ),
@@ -226,31 +263,29 @@ class _HomePageState extends State<HomePage> {
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(12),
-                    child: Text(_status!),
+                    child: SelectableText(_status!),
                   ),
                 ),
               ],
               if (_lastDraft != null) ...[
-                const SizedBox(height: 12),
-                Expanded(
-                  child: Card(
-                    child: Padding(
+                const SizedBox(height: 8),
+                ExpansionTile(
+                  title: const Text('FamilyAction 草稿'),
+                  children: [
+                    Padding(
                       padding: const EdgeInsets.all(12),
-                      child: SingleChildScrollView(
-                        child: SelectableText(_lastDraft!),
-                      ),
+                      child: SelectableText(_lastDraft!),
                     ),
-                  ),
+                  ],
                 ),
-              ] else
-                const Spacer(),
-              const SizedBox(height: 12),
+              ],
+              const Spacer(),
               TextField(
                 controller: _controller,
                 minLines: 1,
-                maxLines: 8,
+                maxLines: 6,
                 decoration: InputDecoration(
-                  hintText: '例如：明天有什麼課？',
+                  hintText: '例如：明天有什麼課？／記得買牛奶／新增待辦：繳學費',
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
                     onPressed: _thinking ? null : _submitText,
@@ -263,6 +298,53 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ModelStatusCard extends StatelessWidget {
+  const _ModelStatusCard({required this.status});
+
+  final Future<LocalModelStatus> status;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<LocalModelStatus>(
+      future: status,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Card(
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Text('正在檢查本機 Llama 模型…'),
+            ),
+          );
+        }
+        if (snapshot.hasError) {
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('無法取得模型狀態：${snapshot.error}'),
+            ),
+          );
+        }
+        final model = snapshot.data!;
+        if (!model.ready) {
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('本機模型尚未安裝。模型路徑：${model.modelPath}'),
+            ),
+          );
+        }
+        final mb = model.modelBytes / (1024 * 1024);
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('本機 Llama 已就緒（${mb.toStringAsFixed(0)} MB）'),
+          ),
+        );
+      },
     );
   }
 }
