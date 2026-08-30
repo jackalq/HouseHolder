@@ -35,6 +35,11 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '9.3.1'
+
       - name: Install Flutter dependencies
         run: flutter pub get
 
@@ -66,7 +71,7 @@ jobs:
           disable-animations: true
           working-directory: ./android
           script: |
-            ./gradlew app:connectedDebugAndroidTest --no-daemon --stacktrace | tee ../llm-e2e-gradle.txt
+            gradle app:connectedDebugAndroidTest --no-daemon --stacktrace | tee ../llm-e2e-gradle.txt
             adb pull /sdcard/Android/data/com.householder.app/files/llm-e2e-output.txt ../llm-e2e-output.txt
             adb logcat -d -v threadtime > ../llm-e2e-logcat.txt
 
