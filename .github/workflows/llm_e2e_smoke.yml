@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/llm_e2e_smoke.yml'
       - '.github/workflows/android_mvp_ci.yml'
+      - '.github/workflows/android_emulator_smoke.yml'
       - 'scripts/llm_e2e_emulator.sh'
       - 'android/app/build.gradle.kts'
       - 'android/app/src/debug/**'
