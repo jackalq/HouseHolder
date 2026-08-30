@@ -78,9 +78,8 @@ class LlmE2eActivity : Activity() {
 
             require(latch.await(15, TimeUnit.MINUTES)) { "LLM generation timed out" }
             generationError?.let { error(it) }
-            require(response.isNotBlank()) { "LLM returned an empty response" }
-            require(response.contains("HOUSEHOLDER_OK")) {
-                "Expected HOUSEHOLDER_OK, got: $response"
+            require(response == "HOUSEHOLDER_OK") {
+                "Expected exact HOUSEHOLDER_OK, got: $response"
             }
 
             evidenceFile("llm-e2e-output.txt").writeText(
