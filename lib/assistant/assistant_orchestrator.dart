@@ -56,21 +56,25 @@ Allowed actions only:
 4. shopping.list
 {"type":"shopping.list","requiresConfirmation":false,"payload":{"includeDone":false}}
 5. shopping.setDone
-{"type":"shopping.setDone","requiresConfirmation":false,"payload":{"id":"item-id","done":true}}
+{"type":"shopping.setDone","requiresConfirmation":false,"payload":{"name":"牛奶","done":true}}
 6. todo.add
 {"type":"todo.add","requiresConfirmation":false,"payload":{"items":[{"id":"stable-id","title":"繳學費","done":false,"dueDate":"YYYY-MM-DD","note":null}]}}
 7. todo.list
 {"type":"todo.list","requiresConfirmation":false,"payload":{"includeDone":false}}
 8. todo.setDone
-{"type":"todo.setDone","requiresConfirmation":false,"payload":{"id":"todo-id","done":true}}
+{"type":"todo.setDone","requiresConfirmation":false,"payload":{"title":"繳學費","done":true}}
 
 Rules:
 - Resolve relative dates such as today/tomorrow into exact YYYY-MM-DD using Current local date.
 - For schedule queries, do not answer courses yourself. Emit schedule.query so the app reads the repository.
 - For shopping/todo lists, emit list actions; do not invent list content.
+- For shopping.setDone use the item name stated by the user. Never invent an internal item ID.
+- For todo.setDone use the todo title stated by the user. Never invent an internal todo ID.
+- The app resolves names/titles against persisted data and rejects missing or ambiguous matches.
 - schedule.import ALWAYS requires confirmation.
 - Never invent OCR fields. Unknown optional fields must be null or omitted; add uncertainty to warnings.
-- IDs for new items must be short unique ASCII identifiers. Never reuse an ID from another item in the same response.
+- For timetable imports, HOUSEHOLDER_IMPORT_CONTEXT values are authoritative user-supplied fields and must be copied exactly into every imported item as childId/validFrom/validUntil.
+- IDs for NEW items must be short unique ASCII identifiers. Never reuse an ID from another item in the same response.
 - If the request is outside supported actions, return {"type":"unsupported","requiresConfirmation":false,"payload":{"reason":"..."}}.
 
 $groundedInput
