@@ -10,29 +10,26 @@ import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Android-only ExecuTorch adapter for the first HouseHolder MVP.
- *
- * Model files are intentionally installed outside the APK under app-private
- * storage so a multi-GB model pack can be downloaded, replaced and verified
- * independently from application releases.
- */
+/** Android-only ExecuTorch adapter for the first HouseHolder MVP. */
 class LocalLlamaEngine(context: Context) {
     companion object {
-        private const val MODEL_DIRECTORY = "model-pack"
-        private const val MODEL_FILE = "llama32-3b-instruct.pte"
-        private val TOKENIZER_FILES = listOf("tokenizer.bin", "tokenizer.model")
+        private const val MODEL_DIRECTORY = RecommendedModelPackDownloader.MODEL_DIRECTORY
+        private val MODEL_FILES = listOf(
+            RecommendedModelPackDownloader.MODEL_FILE,
+            "llama32-3b-instruct.pte",
+        )
+        private val TOKENIZER_FILES = listOf(
+            RecommendedModelPackDownloader.TOKENIZER_FILE,
+            "tokenizer.bin",
+        )
     }
 
     private val appContext = context.applicationContext
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    @Volatile
-    private var module: LlmModule? = null
-
-    @Volatile
-    private var generating = false
+    @Volatile private var module: LlmModule? = null
+    @Volatile private var generating = false
 
     data class ModelStatus(
         val ready: Boolean,
@@ -79,7 +76,7 @@ class LocalLlamaEngine(context: Context) {
         if (!currentStatus.ready || currentStatus.tokenizerPath == null) {
             onError(
                 "MODEL_NOT_INSTALLED",
-                "Install $MODEL_FILE and a tokenizer file under ${modelDirectory().absolutePath}",
+                "Install the recommended model pack or manually select a compatible .pte and tokenizer.",
             )
             return
         }
@@ -141,10 +138,7 @@ class LocalLlamaEngine(context: Context) {
         temperature: Float,
     ): LlmModule {
         module?.let { return it }
-
         val created = LlmModule(modelPath, tokenizerPath, temperature)
-        // ExecuTorch Android 1.3.x exposes load() as Unit and reports failures
-        // by throwing. Treat successful return as a loaded module.
         created.load()
         module = created
         return created
@@ -165,7 +159,14 @@ class LocalLlamaEngine(context: Context) {
 
     private fun modelDirectory(): File = File(appContext.filesDir, MODEL_DIRECTORY)
 
-    private fun modelFile(): File = File(modelDirectory(), MODEL_FILE)
+    private fun modelFile(): File {
+        val directory = modelDirectory()
+        return MODEL_FILES
+            .asSequence()
+            .map { File(directory, it) }
+            .firstOrNull { it.isFile && it.length() > 0L }
+            ?: File(directory, RecommendedModelPackDownloader.MODEL_FILE)
+    }
 
     private fun tokenizerFileOrNull(): File? = TOKENIZER_FILES
         .asSequence()
