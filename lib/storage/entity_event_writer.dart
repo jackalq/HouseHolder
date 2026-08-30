@@ -66,6 +66,7 @@ class EntityEventWriter {
     final now = DateTime.now().toUtc();
     final previousHash = currentRecord['hash'] as String?;
     final currentVersion = currentRecord['version'] as int? ?? 1;
+    final currentData = _dataOf(currentRecord);
     final nextRecord = <String, Object?>{
       ...currentRecord,
       'version': currentVersion + 1,
@@ -86,6 +87,7 @@ class EntityEventWriter {
         deviceId: deviceId,
         timestamp: now,
         baseHash: previousHash,
+        baseData: currentData,
         patch: patch,
       ),
       deviceId,
@@ -94,11 +96,47 @@ class EntityEventWriter {
     return nextRecord;
   }
 
-  Future<void> _appendEvent(
-    ChangeEvent event,
-    String deviceId,
-    DateTime now,
-  ) async {
+  Future<Map<String, Object?>> appendDelete({
+    required String entityType,
+    required String entityId,
+    required String dataPath,
+    required Map<String, Object?> currentRecord,
+  }) async {
+    final deviceId = await _deviceIdentity.getOrCreate();
+    final now = DateTime.now().toUtc();
+    final currentVersion = currentRecord['version'] as int? ?? 1;
+    final nextRecord = <String, Object?>{
+      ...currentRecord,
+      'version': currentVersion + 1,
+      'modifiedBy': deviceId,
+      'modifiedAt': now.toIso8601String(),
+      'deleted': true,
+    };
+    await _documents.appendJsonLine(dataPath, nextRecord);
+    await _appendEvent(
+      ChangeEvent(
+        opId: _opId(deviceId, entityId, now),
+        entityType: entityType,
+        entityId: entityId,
+        operation: ChangeOperation.delete,
+        deviceId: deviceId,
+        timestamp: now,
+        baseHash: currentRecord['hash'] as String?,
+        baseData: _dataOf(currentRecord),
+      ),
+      deviceId,
+      now,
+    );
+    return nextRecord;
+  }
+
+  Map<String, Object?> _dataOf(Map<String, Object?> record) {
+    final raw = record['data'];
+    if (raw is! Map) throw const FormatException('Entity record data must be an object.');
+    return raw.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  Future<void> _appendEvent(ChangeEvent event, String deviceId, DateTime now) async {
     await _documents.appendJsonLine(
       'sync/events/${safeSegment(deviceId)}/${eventFileKey(now)}.jsonl',
       event.toJson(),
