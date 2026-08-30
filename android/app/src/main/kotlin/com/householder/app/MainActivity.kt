@@ -1,11 +1,13 @@
 package com.householder.app
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -18,6 +20,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -25,11 +28,18 @@ class MainActivity : FlutterActivity() {
         private const val SPEECH_CHANNEL = "householder/speech"
         private const val LLM_CHANNEL = "family_butler/llm"
         private const val AUDIO_PERMISSION_REQUEST = 7101
+        private const val MODEL_FILE_REQUEST = 7201
+        private const val TOKENIZER_FILE_REQUEST = 7202
+        private const val MODEL_DIRECTORY = "model-pack"
+        private const val MODEL_FILE = "llama32-3b-instruct.pte"
+        private const val TOKENIZER_FILE = "tokenizer.bin"
     }
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var pendingSpeechResult: MethodChannel.Result? = null
     private var pendingOnDeviceOnly = false
+    private var pendingFilePickResult: MethodChannel.Result? = null
+    private val fileExecutor = Executors.newSingleThreadExecutor()
     private lateinit var llamaEngine: LocalLlamaEngine
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
@@ -72,6 +82,14 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "isModelReady" -> result.success(llamaEngine.status().ready)
                     "modelStatus" -> result.success(llamaEngine.status().toMap())
+                    "pickModelFile" -> startModelFilePicker(MODEL_FILE_REQUEST, result)
+                    "pickTokenizerFile" -> startModelFilePicker(TOKENIZER_FILE_REQUEST, result)
+                    "deleteModelPack" -> {
+                        llamaEngine.close()
+                        File(filesDir, MODEL_DIRECTORY).deleteRecursively()
+                        llamaEngine = LocalLlamaEngine(this)
+                        result.success(llamaEngine.status().toMap())
+                    }
                     "stop" -> {
                         llamaEngine.stop()
                         result.success(null)
@@ -91,6 +109,107 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun startModelFilePicker(requestCode: Int, result: MethodChannel.Result) {
+        if (pendingFilePickResult != null) {
+            result.error("FILE_PICK_BUSY", "Another model file picker is already open", null)
+            return
+        }
+        pendingFilePickResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        startActivityForResult(intent, requestCode)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == MODEL_FILE_REQUEST || requestCode == TOKENIZER_FILE_REQUEST) {
+            val callback = pendingFilePickResult
+            pendingFilePickResult = null
+            if (callback == null) return
+            if (resultCode != Activity.RESULT_OK) {
+                callback.success(false)
+                return
+            }
+            val uri = data?.data
+            if (uri == null) {
+                callback.error("FILE_PICK_FAILED", "No document URI returned", null)
+                return
+            }
+            copyModelDocument(uri, requestCode, callback)
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    private fun copyModelDocument(
+        uri: Uri,
+        requestCode: Int,
+        callback: MethodChannel.Result,
+    ) {
+        val metadata = documentMetadata(uri)
+        if (requestCode == MODEL_FILE_REQUEST &&
+            metadata.first != null &&
+            !metadata.first!!.lowercase(Locale.ROOT).endsWith(".pte")
+        ) {
+            callback.error("INVALID_MODEL_FILE", "Please choose an ExecuTorch .pte model", metadata.first)
+            return
+        }
+
+        val targetDirectory = File(filesDir, MODEL_DIRECTORY).apply { mkdirs() }
+        val target = File(
+            targetDirectory,
+            if (requestCode == MODEL_FILE_REQUEST) MODEL_FILE else TOKENIZER_FILE,
+        )
+        val expectedBytes = metadata.second
+        if (expectedBytes != null && expectedBytes > 0 && targetDirectory.usableSpace < expectedBytes) {
+            callback.error("INSUFFICIENT_SPACE", "Not enough free space for selected model file", expectedBytes)
+            return
+        }
+
+        fileExecutor.execute {
+            try {
+                contentResolver.openInputStream(uri).use { input ->
+                    requireNotNull(input) { "Unable to open selected document" }
+                    val temporary = File(target.absolutePath + ".tmp")
+                    temporary.outputStream().buffered().use { output -> input.copyTo(output) }
+                    if (target.exists()) target.delete()
+                    if (!temporary.renameTo(target)) {
+                        temporary.copyTo(target, overwrite = true)
+                        temporary.delete()
+                    }
+                }
+                runOnUiThread {
+                    llamaEngine.close()
+                    llamaEngine = LocalLlamaEngine(this)
+                    callback.success(true)
+                }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    callback.error(
+                        "MODEL_COPY_FAILED",
+                        error.message ?: error.javaClass.simpleName,
+                        null,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun documentMetadata(uri: Uri): Pair<String?, Long?> {
+        var name: String? = null
+        var size: Long? = null
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (nameIndex >= 0) name = cursor.getString(nameIndex)
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+            }
+        }
+        return name to size
     }
 
     private fun recognizeImage(imagePath: String, result: MethodChannel.Result) {
@@ -246,6 +365,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         cleanupSpeech()
         if (::llamaEngine.isInitialized) llamaEngine.close()
+        fileExecutor.shutdownNow()
         super.onDestroy()
     }
 }
