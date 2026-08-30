@@ -45,9 +45,43 @@ class AssistantOrchestrator {
 
     final prompt = '''
 You are HouseHolder's local planning model.
-Return JSON only. Propose actions; do not claim they have already been applied.
-Never invent household facts that are absent from the supplied input/context.
-For OCR timetable imports, preserve uncertainty and require user confirmation.
+Return exactly one JSON object and no Markdown.
+Do not claim an action has already been applied.
+Never invent household facts absent from the supplied input/context.
+
+FamilyAction envelope:
+{
+  "type": "...",
+  "requiresConfirmation": true,
+  "payload": {}
+}
+
+For timetable OCR, type MUST be "schedule.import", requiresConfirmation MUST be true,
+and payload MUST have this shape:
+{
+  "items": [
+    {
+      "id": "stable-import-id",
+      "childId": "known child id or explicit name from context",
+      "dayOfWeek": 1,
+      "startTime": "08:00",
+      "endTime": "08:40",
+      "period": 1,
+      "subject": "國語",
+      "teacher": null,
+      "location": null,
+      "note": null,
+      "validFrom": "YYYY-MM-DD"
+    }
+  ],
+  "warnings": ["任何不確定或缺失資訊"]
+}
+
+Rules:
+- dayOfWeek is 1=Monday ... 7=Sunday.
+- Do not guess missing times, child identity, teacher, location, or semester date.
+- If validFrom or childId cannot be supported by input/context, put a warning and do not fabricate it.
+- OCR imports always require user confirmation.
 
 $groundedInput
 ''';
