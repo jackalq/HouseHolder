@@ -27,6 +27,7 @@ class MainActivity : FlutterActivity() {
         private const val OCR_CHANNEL = "householder/ocr"
         private const val SPEECH_CHANNEL = "householder/speech"
         private const val LLM_CHANNEL = "family_butler/llm"
+        private const val SYNC_TREE_CHANNEL = "householder/sync_tree"
         private const val AUDIO_PERMISSION_REQUEST = 7101
         private const val MODEL_FILE_REQUEST = 7201
         private const val TOKENIZER_FILE_REQUEST = 7202
@@ -41,10 +42,12 @@ class MainActivity : FlutterActivity() {
     private var pendingFilePickResult: MethodChannel.Result? = null
     private val fileExecutor = Executors.newSingleThreadExecutor()
     private lateinit var llamaEngine: LocalLlamaEngine
+    private lateinit var syncTree: SafSyncTree
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         llamaEngine = LocalLlamaEngine(this)
+        syncTree = SafSyncTree(this)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OCR_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -109,6 +112,57 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SYNC_TREE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "status" -> result.success(syncTree.status())
+                    "pickTree" -> syncTree.pickTree(result)
+                    "clearTree" -> result.success(syncTree.clear())
+                    "list" -> {
+                        val prefix = call.argument<String>("prefix").orEmpty()
+                        runFileTask(result) { syncTree.list(prefix) }
+                    }
+                    "readText" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrBlank()) {
+                            result.error("INVALID_SYNC_PATH", "path is required", null)
+                        } else {
+                            runFileTask(result) { syncTree.readText(path) }
+                        }
+                    }
+                    "writeText" -> {
+                        val path = call.argument<String>("path")
+                        val content = call.argument<String>("content")
+                        if (path.isNullOrBlank() || content == null) {
+                            result.error("INVALID_SYNC_WRITE", "path and content are required", null)
+                        } else {
+                            runFileTask(result) {
+                                syncTree.writeText(path, content)
+                                null
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun runFileTask(result: MethodChannel.Result, block: () -> Any?) {
+        fileExecutor.execute {
+            try {
+                val value = block()
+                runOnUiThread { result.success(value) }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    result.error(
+                        "SYNC_IO_FAILED",
+                        error.message ?: error.javaClass.simpleName,
+                        null,
+                    )
+                }
+            }
+        }
     }
 
     private fun startModelFilePicker(requestCode: Int, result: MethodChannel.Result) {
@@ -125,6 +179,9 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (::syncTree.isInitialized && syncTree.handleActivityResult(requestCode, resultCode, data)) {
+            return
+        }
         if (requestCode == MODEL_FILE_REQUEST || requestCode == TOKENIZER_FILE_REQUEST) {
             val callback = pendingFilePickResult
             pendingFilePickResult = null

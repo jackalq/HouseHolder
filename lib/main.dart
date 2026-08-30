@@ -7,6 +7,7 @@ import 'assistant/local_llama_gateway.dart';
 import 'features/schedule/schedule_import_models.dart';
 import 'features/schedule/schedule_preview_page.dart';
 import 'features/schedule/timetable_import_page.dart';
+import 'features/sync/sync_page.dart';
 import 'platform/ocr_gateway.dart';
 import 'platform/speech_gateway.dart';
 
@@ -70,7 +71,6 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(builder: (_) => const TimetableImportPage()),
     );
     if (!mounted || document == null || document.fullText.trim().isEmpty) return;
-
     _controller.text = document.fullText;
     await _propose(
       ImageAssistantInput(
@@ -80,18 +80,27 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> _openSync() async {
+    try {
+      final services = await _servicesFuture;
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(builder: (_) => SyncPage(services: services)),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _status = '開啟家庭同步失敗：$error');
+    }
+  }
+
   Future<void> _recognizeSpeech() async {
     if (_listening || _thinking) return;
     setState(() {
       _listening = true;
       _status = '正在聽…';
     });
-
     try {
       final onDeviceAvailable = await _speech.isOnDeviceAvailable();
-      final transcript = await _speech.recognizeOnce(
-        onDeviceOnly: onDeviceAvailable,
-      );
+      final transcript = await _speech.recognizeOnce(onDeviceOnly: onDeviceAvailable);
       if (!mounted) return;
       _controller.text = transcript.text;
       setState(() {
@@ -101,8 +110,7 @@ class _HomePageState extends State<HomePage> {
       });
       await _propose(SpeechAssistantInput(transcript.text));
     } catch (error) {
-      if (!mounted) return;
-      setState(() => _status = '語音辨識失敗：$error');
+      if (mounted) setState(() => _status = '語音辨識失敗：$error');
     } finally {
       if (mounted) setState(() => _listening = false);
     }
@@ -121,15 +129,13 @@ class _HomePageState extends State<HomePage> {
       _lastDraft = null;
       _status = '管家正在產生結構化動作…';
     });
-
     try {
       final draft = await _assistant.propose(input);
       if (!mounted) return;
       setState(() => _lastDraft = draft.rawJson);
       await _handleDraft(draft.rawJson);
     } catch (error) {
-      if (!mounted) return;
-      setState(() => _status = '處理失敗：$error');
+      if (mounted) setState(() => _status = '處理失敗：$error');
     } finally {
       if (mounted) setState(() => _thinking = false);
     }
@@ -148,9 +154,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     final confirmedDraft = await Navigator.of(context).push<ScheduleImportDraft>(
-      MaterialPageRoute(
-        builder: (_) => SchedulePreviewPage(draft: scheduleDraft),
-      ),
+      MaterialPageRoute(builder: (_) => SchedulePreviewPage(draft: scheduleDraft)),
     );
     if (!mounted) return;
     if (confirmedDraft == null) {
@@ -211,9 +215,7 @@ class _HomePageState extends State<HomePage> {
     try {
       final installed = await _llama.pickModelFile();
       if (!mounted) return;
-      setState(() {
-        _status = installed ? '模型檔已複製到 App 私有儲存空間。' : '已取消選擇模型檔。';
-      });
+      setState(() => _status = installed ? '模型檔已複製到 App 私有儲存空間。' : '已取消選擇模型檔。');
       _refreshModelStatus();
     } catch (error) {
       if (mounted) setState(() => _status = '模型檔安裝失敗：$error');
@@ -289,7 +291,7 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            const Text('Android MVP：課表、語音、購物與待辦。'),
+            const Text('Android MVP：課表、語音、購物、待辦與家庭同步。'),
             const SizedBox(height: 12),
             _ModelStatusCard(
               status: _modelStatusFuture,
@@ -322,6 +324,11 @@ class _HomePageState extends State<HomePage> {
                   onPressed: _showTodos,
                   icon: const Icon(Icons.checklist_outlined),
                   label: const Text('待辦'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _openSync,
+                  icon: const Icon(Icons.sync),
+                  label: const Text('家庭同步'),
                 ),
               ],
             ),
