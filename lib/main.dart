@@ -47,6 +47,7 @@ class _HomePageState extends State<HomePage> {
 
   bool _listening = false;
   bool _thinking = false;
+  bool _modelBusy = false;
   String? _status;
   String? _lastDraft;
 
@@ -200,6 +201,69 @@ class _HomePageState extends State<HomePage> {
     setState(() => _modelStatusFuture = _llama.modelStatus());
   }
 
+  Future<void> _pickModelFile() async {
+    if (_modelBusy) return;
+    setState(() {
+      _modelBusy = true;
+      _status = '請選擇 Llama 3.2 3B 的 ExecuTorch .pte 檔案。';
+    });
+    try {
+      final installed = await _llama.pickModelFile();
+      if (!mounted) return;
+      setState(() => _status = installed ? '模型檔已複製到 App 私有儲存空間。' : '已取消選擇模型檔。');
+      _refreshModelStatus();
+    } catch (error) {
+      if (mounted) setState(() => _status = '模型檔安裝失敗：$error');
+    } finally {
+      if (mounted) setState(() => _modelBusy = false);
+    }
+  }
+
+  Future<void> _pickTokenizerFile() async {
+    if (_modelBusy) return;
+    setState(() {
+      _modelBusy = true;
+      _status = '請選擇對應的 tokenizer 檔案。';
+    });
+    try {
+      final installed = await _llama.pickTokenizerFile();
+      if (!mounted) return;
+      setState(() => _status = installed ? 'Tokenizer 已安裝。' : '已取消選擇 tokenizer。');
+      _refreshModelStatus();
+    } catch (error) {
+      if (mounted) setState(() => _status = 'Tokenizer 安裝失敗：$error');
+    } finally {
+      if (mounted) setState(() => _modelBusy = false);
+    }
+  }
+
+  Future<void> _deleteModelPack() async {
+    if (_modelBusy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('刪除本機模型？'),
+        content: const Text('只會刪除 App 私有空間中的模型與 tokenizer，不會刪除家庭資料。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('刪除')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _modelBusy = true);
+    try {
+      await _llama.deleteModelPack();
+      if (!mounted) return;
+      setState(() => _status = '本機模型已刪除。');
+      _refreshModelStatus();
+    } catch (error) {
+      if (mounted) setState(() => _status = '刪除模型失敗：$error');
+    } finally {
+      if (mounted) setState(() => _modelBusy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -226,7 +290,13 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(height: 8),
               const Text('Android MVP：課表、語音、購物與待辦。'),
               const SizedBox(height: 12),
-              _ModelStatusCard(status: _modelStatusFuture),
+              _ModelStatusCard(
+                status: _modelStatusFuture,
+                busy: _modelBusy,
+                onPickModel: _pickModelFile,
+                onPickTokenizer: _pickTokenizerFile,
+                onDelete: _deleteModelPack,
+              ),
               const SizedBox(height: 16),
               Wrap(
                 spacing: 12,
@@ -254,7 +324,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ],
               ),
-              if (_thinking) ...[
+              if (_thinking || _modelBusy) ...[
                 const SizedBox(height: 18),
                 const LinearProgressIndicator(),
               ],
@@ -303,9 +373,19 @@ class _HomePageState extends State<HomePage> {
 }
 
 class _ModelStatusCard extends StatelessWidget {
-  const _ModelStatusCard({required this.status});
+  const _ModelStatusCard({
+    required this.status,
+    required this.busy,
+    required this.onPickModel,
+    required this.onPickTokenizer,
+    required this.onDelete,
+  });
 
   final Future<LocalModelStatus> status;
+  final bool busy;
+  final VoidCallback onPickModel;
+  final VoidCallback onPickTokenizer;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -329,19 +409,45 @@ class _ModelStatusCard extends StatelessWidget {
           );
         }
         final model = snapshot.data!;
-        if (!model.ready) {
-          return Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text('本機模型尚未安裝。模型路徑：${model.modelPath}'),
-            ),
-          );
-        }
         final mb = model.modelBytes / (1024 * 1024);
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: Text('本機 Llama 已就緒（${mb.toStringAsFixed(0)} MB）'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  model.ready
+                      ? '本機 Llama 已就緒（${mb.toStringAsFixed(0)} MB）'
+                      : '本機 Llama 尚未就緒',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                if (!model.ready) ...[
+                  const SizedBox(height: 6),
+                  Text(model.modelBytes > 0 ? '模型檔已存在，尚缺 tokenizer。' : '請安裝 .pte 模型與 tokenizer。'),
+                ],
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton(
+                      onPressed: busy ? null : onPickModel,
+                      child: Text(model.modelBytes > 0 ? '更換 .pte' : '選擇 .pte'),
+                    ),
+                    OutlinedButton(
+                      onPressed: busy ? null : onPickTokenizer,
+                      child: Text(model.tokenizerPath != null ? '更換 tokenizer' : '選擇 tokenizer'),
+                    ),
+                    if (model.modelBytes > 0 || model.tokenizerPath != null)
+                      TextButton(
+                        onPressed: busy ? null : onDelete,
+                        child: const Text('刪除模型'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
         );
       },
