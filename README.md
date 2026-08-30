@@ -1,70 +1,70 @@
 # HouseHolder
 
-Privacy-first household butler. The first executable MVP targets **Android** and uses Flutter for the shared application/domain layer.
+Android-first privacy-focused family assistant MVP.
 
-## First MVP goal
+## Current MVP capabilities
 
-The first vertical slice is deliberately narrow and testable:
+- Android Flutter application shell.
+- On-device Chinese OCR for school timetable photos.
+- Timetable review/edit before persistence.
+- Android speech recognition with on-device mode when supported.
+- Local Llama 3.2 3B through ExecuTorch Android.
+- Llama model/tokenizer installation through Android file picker.
+- Typed `FamilyAction` validation; the model never writes household data directly.
+- Hierarchical JSON/JSONL persistence with canonical SHA-256 content hashes.
+- Append-only per-device change events.
+- Grounded schedule queries from persisted household data.
+- Shopping list and todo CRUD.
+- Android shared-folder sync through Storage Access Framework (SAF), suitable for a shared Google Drive folder exposed by the system document provider.
+- Deterministic remote-event merge with conflict inbox and user-confirmed conflict resolution events.
+- Shopping comparison contracts, normalized merchant offers, deterministic shipping-aware basket optimization, and external purchase-link handoff.
 
-```text
-Android phone
-  -> photograph school timetable
-  -> on-device OCR
-  -> timetable preview/correction
-  -> local Llama 3.2 3B proposes ScheduleItems
-  -> schema validation + user confirmation
-  -> hierarchical JSON repository
-  -> ask: "明天小孩有什麼課？"
-  -> answer from household data
+## Android build
+
+The repository CI uses Flutter stable and runs:
+
+```bash
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --debug
 ```
 
-Voice and text enter the same assistant pipeline. Shopping and todo actions use the same typed FamilyAction boundary.
+A successful GitHub Actions run uploads the debug APK as the `householder-debug-apk` artifact.
 
-## Architecture rules
+## Local model pack
 
-- **Model proposes; application decides.** The model never directly mutates household files, Drive data, credentials, carts or payments.
-- Household persistence is a **hierarchical JSON document store**, not a shared SQLite database.
-- Summary/index documents are separated from details and can be rebuilt.
-- Changes become **append-only per-device events**.
-- Canonical JSON + hashes/baseHash provide optimistic concurrency.
-- Merge order is deterministic merge first, then an LLM semantic *proposal* only for unresolved ambiguity.
-- Skills and Formats are declarative/versioned so Butler capabilities can expand without rewriting the orchestrator.
+The model is intentionally not committed to the repository. Install the following through the app UI:
 
-## Android-first stack
+- `llama32-3b-instruct.pte`
+- matching tokenizer (`tokenizer.bin` or supported tokenizer model)
 
-- UI/application: Flutter
-- Local LLM: PyTorch ExecuTorch + quantized Llama 3.2 3B Instruct
-- OCR: Android on-device adapter through `householder/ocr`
-- Speech: Android speech-to-text adapter through `householder/speech`
-- Local data: hierarchical JSON/JSONL files
-- Sync: encrypted append-only household events over Google Drive (later MVP milestone)
-- Shopping: web/provider adapters + deterministic basket optimizer
+See `model/README.md` and the export helper under `scripts/` for the ExecuTorch model-pack path.
 
-Large model files are intentionally not committed to Git. Treat the `.pte` model and tokenizer as an installable model pack.
+## Household sync
 
-## Current code
+On each Android phone:
 
-- `lib/main.dart` — Android-first Flutter home shell.
-- `lib/assistant/local_llama_gateway.dart` — local LLM platform-channel contract.
-- `lib/assistant/assistant_orchestrator.dart` — common text/speech/image-OCR entry point.
-- `lib/platform/ocr_gateway.dart` — OCR document/block contract including bounds.
-- `lib/platform/speech_gateway.dart` — speech recognition contract with on-device capability check.
-- `lib/storage/json_repository.dart` — hierarchical JSON + JSONL document repository.
-- `lib/storage/canonical_json.dart` — stable canonical representation for hashing.
-- `lib/storage/change_event.dart` — append-only change event model.
-- `lib/skills/skill_definition.dart` — declarative Skill registry contract.
-- `formats/` and `skills/` — versioned Format/Skill definitions.
-- `docs/MVP_PLAN.md` — Android MVP milestones and acceptance target.
+1. Open **家庭同步**.
+2. Choose the same shared HouseHolder folder through Android's system folder picker.
+3. Grant persistent read/write access to that folder only.
+4. Tap **立即同步**.
+5. Resolve any same-field conflicts explicitly in the conflict inbox.
 
-## MVP sequence
+The sync model uses one append-only event stream per device, optimistic `baseHash` checks, deterministic field merge, and explicit user confirmation for ambiguous conflicts.
 
-1. Complete Android Flutter platform shell.
-2. Wire Android OCR and image selection/camera input.
-3. Build timetable import preview + validation.
-4. Persist confirmed schedule data in hierarchical JSON.
-5. Wire local Llama through ExecuTorch and structured FamilyActions.
-6. Add Android speech input.
-7. Add per-device event log + merge engine.
-8. Add Google Drive transport.
-9. Add shopping search/normalization/basket optimization.
-10. Port shared layers to iOS after the Android slice is validated.
+## Shopping comparison
+
+HouseHolder does not store web-search API secrets in the APK. A stateless offer-search endpoint can return normalized `MerchantOffer` records; the Android app performs money, shipping-threshold, merchant-count, and basket-plan calculations locally.
+
+Supported strategies:
+
+- lowest delivered total
+- lowest one-stop total
+- fewest merchants
+
+V1 stops at external purchase links. No autonomous checkout or payment.
+
+## Core rule
+
+**Model proposes; application validates and decides.**
