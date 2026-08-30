@@ -1,75 +1,86 @@
-import '../../storage/change_event.dart';
-import '../../storage/device_identity.dart';
-import '../../storage/hash_service.dart';
+import 'dart:io';
+
+import '../../storage/entity_event_writer.dart';
 import '../../storage/json_repository.dart';
 import 'schedule_import_models.dart';
 
 class ScheduleRepository {
   ScheduleRepository({
     required JsonDocumentRepository documents,
-    required DeviceIdentity deviceIdentity,
-    HashService hashService = const HashService(),
+    required EntityEventWriter writer,
   })  : _documents = documents,
-        _deviceIdentity = deviceIdentity,
-        _hashService = hashService;
+        _writer = writer;
 
   final JsonDocumentRepository _documents;
-  final DeviceIdentity _deviceIdentity;
-  final HashService _hashService;
+  final EntityEventWriter _writer;
 
   Future<void> importConfirmed(ScheduleImportDraft draft) async {
-    final deviceId = await _deviceIdentity.getOrCreate();
-    final now = DateTime.now().toUtc();
-
     for (final item in draft.items) {
-      final data = item.toJson();
-      final hash = _hashService.contentHash(data);
-      final record = <String, Object?>{
-        'id': item.id,
-        'version': 1,
-        'data': data,
-        'hash': hash,
-        'createdBy': deviceId,
-        'createdAt': now.toIso8601String(),
-        'modifiedBy': deviceId,
-        'modifiedAt': now.toIso8601String(),
-        'deleted': false,
-      };
-
       final semesterKey = _semesterKey(item.validFrom);
-      final childPath = _safeSegment(item.childId);
-      await _documents.appendJsonLine(
-        'family/children/$childPath/schedule/$semesterKey.jsonl',
-        record,
-      );
-
-      final event = ChangeEvent(
-        opId: _opId(deviceId, item.id, now),
+      final childPath = _writer.safeSegment(item.childId);
+      await _writer.appendCreate(
         entityType: 'scheduleItem',
         entityId: item.id,
-        operation: ChangeOperation.create,
-        deviceId: deviceId,
-        timestamp: now,
-        value: record,
-      );
-      await _documents.appendJsonLine(
-        'sync/events/${_safeSegment(deviceId)}/${_eventFileKey(now)}.jsonl',
-        event.toJson(),
+        dataPath: 'family/children/$childPath/schedule/$semesterKey.jsonl',
+        data: item.toJson(),
       );
     }
   }
 
-  String _semesterKey(String validFrom) => validFrom.substring(0, 7);
-
-  String _eventFileKey(DateTime value) =>
-      '${value.year.toString().padLeft(4, '0')}${value.month.toString().padLeft(2, '0')}';
-
-  String _opId(String deviceId, String entityId, DateTime timestamp) =>
-      '${timestamp.microsecondsSinceEpoch}-${_safeSegment(deviceId)}-${_safeSegment(entityId)}';
-
-  String _safeSegment(String value) {
-    final safe = value.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-    if (safe.isEmpty) throw const FormatException('Unsafe empty storage segment.');
-    return safe;
+  Future<List<ScheduleImportItem>> forDate(
+    DateTime date, {
+    String? childId,
+  }) async {
+    final items = await _allLatest(childId: childId);
+    final matches = items.where((item) => item.appliesTo(date)).toList();
+    matches.sort((a, b) {
+      final periodCompare = (a.period ?? 999).compareTo(b.period ?? 999);
+      if (periodCompare != 0) return periodCompare;
+      return (a.startTime ?? '99:99').compareTo(b.startTime ?? '99:99');
+    });
+    return matches;
   }
+
+  Future<List<ScheduleImportItem>> _allLatest({String? childId}) async {
+    final root = Directory('${_documents.rootDirectory.path}/family/children');
+    if (!await root.exists()) return const [];
+
+    final latest = <String, Map<String, Object?>>{};
+    await for (final entity in root.list(recursive: true, followLinks: false)) {
+      if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
+      if (!entity.path.contains('${Platform.pathSeparator}schedule${Platform.pathSeparator}')) {
+        continue;
+      }
+      final relative = entity.path
+          .substring(_documents.rootDirectory.path.length + 1)
+          .replaceAll('\\', '/');
+      final rows = await _documents.readJsonLines(relative);
+      for (final row in rows) {
+        final id = row['id'];
+        if (id is! String || id.isEmpty) continue;
+        final existing = latest[id];
+        if (existing == null || _version(row) >= _version(existing)) {
+          latest[id] = row;
+        }
+      }
+    }
+
+    final result = <ScheduleImportItem>[];
+    for (final row in latest.values) {
+      if (row['deleted'] == true) continue;
+      final data = row['data'];
+      if (data is! Map) continue;
+      final item = ScheduleImportItem.fromJson(
+        data.map((key, value) => MapEntry(key.toString(), value)),
+      );
+      if (childId == null || childId.isEmpty || item.childId == childId) {
+        result.add(item);
+      }
+    }
+    return result;
+  }
+
+  int _version(Map<String, Object?> row) => row['version'] as int? ?? 0;
+
+  String _semesterKey(String validFrom) => validFrom.substring(0, 7);
 }
