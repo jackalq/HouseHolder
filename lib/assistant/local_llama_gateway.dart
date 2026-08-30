@@ -73,7 +73,9 @@ class RecommendedModelDownloadStatus {
   final int totalBytes;
   final String? error;
 
-  double get progress => totalBytes <= 0 ? 0 : (downloadedBytes / totalBytes).clamp(0, 1);
+  double get progress => totalBytes <= 0
+      ? 0
+      : (downloadedBytes / totalBytes).clamp(0.0, 1.0).toDouble();
 
   factory RecommendedModelDownloadStatus.fromMap(Map<Object?, Object?> map) {
     return RecommendedModelDownloadStatus(
