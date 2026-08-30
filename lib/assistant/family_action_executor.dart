@@ -41,8 +41,18 @@ class FamilyActionExecutor {
       'todo.add' => _todoAdd(action),
       'todo.list' => _todoList(action),
       'todo.setDone' => _todoSetDone(action),
+      'unsupported' => _unsupported(action),
       _ => throw FormatException('Unsupported FamilyAction type: ${action.type}'),
     };
+  }
+
+  Future<ActionExecutionResult> _unsupported(FamilyAction action) async {
+    final reason = action.payload['reason'];
+    return ActionExecutionResult(
+      message: reason is String && reason.trim().isNotEmpty
+          ? '目前 MVP 不支援：${reason.trim()}'
+          : '目前 MVP 不支援這個操作。',
+    );
   }
 
   Future<ActionExecutionResult> _scheduleImport(FamilyAction action) async {
