@@ -204,7 +204,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _refreshModelStatus() {
-    setState(() => _modelStatusFuture = _llama.modelStatus());
+    final nextStatus = _llama.modelStatus();
+    setState(() {
+      _modelStatusFuture = nextStatus;
+    });
   }
 
   Future<void> _pickModelFile() async {
