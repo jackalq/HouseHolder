@@ -4,6 +4,7 @@ import 'app_services.dart';
 import 'assistant/assistant_orchestrator.dart';
 import 'assistant/family_action.dart';
 import 'assistant/local_llama_gateway.dart';
+import 'features/model/recommended_model_installer.dart';
 import 'features/schedule/schedule_import_models.dart';
 import 'features/schedule/schedule_preview_page.dart';
 import 'features/schedule/timetable_import_page.dart';
@@ -296,6 +297,7 @@ class _HomePageState extends State<HomePage> {
             _ModelStatusCard(
               status: _modelStatusFuture,
               busy: _modelBusy,
+              onInstalled: _refreshModelStatus,
               onPickModel: _pickModelFile,
               onPickTokenizer: _pickTokenizerFile,
               onDelete: _deleteModelPack,
@@ -383,6 +385,7 @@ class _ModelStatusCard extends StatelessWidget {
   const _ModelStatusCard({
     required this.status,
     required this.busy,
+    required this.onInstalled,
     required this.onPickModel,
     required this.onPickTokenizer,
     required this.onDelete,
@@ -390,6 +393,7 @@ class _ModelStatusCard extends StatelessWidget {
 
   final Future<LocalModelStatus> status;
   final bool busy;
+  final VoidCallback onInstalled;
   final VoidCallback onPickModel;
   final VoidCallback onPickTokenizer;
   final VoidCallback onDelete;
@@ -429,14 +433,18 @@ class _ModelStatusCard extends StatelessWidget {
                       : '本機 Llama 尚未就緒',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
+                const SizedBox(height: 4),
+                const Text('Built with Llama'),
                 if (!model.ready) ...[
                   const SizedBox(height: 6),
                   Text(
                     model.modelBytes > 0
                         ? '模型檔已存在，尚缺 tokenizer。'
-                        : '請安裝 .pte 模型與 tokenizer。',
+                        : '可一鍵下載我們挑選並驗證的推薦模型，或手動選擇相容檔案。',
                   ),
                 ],
+                const SizedBox(height: 10),
+                RecommendedModelInstaller(onInstalled: onInstalled),
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
@@ -444,12 +452,12 @@ class _ModelStatusCard extends StatelessWidget {
                   children: [
                     OutlinedButton(
                       onPressed: busy ? null : onPickModel,
-                      child: Text(model.modelBytes > 0 ? '更換 .pte' : '選擇 .pte'),
+                      child: Text(model.modelBytes > 0 ? '更換 .pte' : '手動選擇 .pte'),
                     ),
                     OutlinedButton(
                       onPressed: busy ? null : onPickTokenizer,
                       child: Text(
-                        model.tokenizerPath != null ? '更換 tokenizer' : '選擇 tokenizer',
+                        model.tokenizerPath != null ? '更換 tokenizer' : '手動選擇 tokenizer',
                       ),
                     ),
                     if (model.modelBytes > 0 || model.tokenizerPath != null)
