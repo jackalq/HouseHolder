@@ -51,9 +51,10 @@ jobs:
             adb exec-out screencap -p > emulator-artifacts/householder-home.png
             adb shell pidof com.householder.app | tr -d '\r' | tee emulator-artifacts/pid.txt
             test -s emulator-artifacts/pid.txt
+            adb shell dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' | tee emulator-artifacts/window-focus.txt
+            grep -q 'com.householder.app' emulator-artifacts/window-focus.txt
             adb shell uiautomator dump /sdcard/householder-window.xml
             adb pull /sdcard/householder-window.xml emulator-artifacts/householder-window.xml
-            grep -Eq 'HouseHolder|家庭管家' emulator-artifacts/householder-window.xml
             ! grep -Eq 'FATAL EXCEPTION|Process: com\.householder\.app.*FATAL' emulator-artifacts/logcat.txt
 
       - name: Upload emulator smoke artifacts
