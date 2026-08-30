@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'assistant/assistant_orchestrator.dart';
+import 'assistant/local_llama_gateway.dart';
 import 'features/schedule/timetable_import_page.dart';
+import 'platform/ocr_gateway.dart';
 import 'platform/speech_gateway.dart';
 
 void main() {
@@ -31,9 +34,12 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _controller = TextEditingController();
   final _speech = SpeechGateway();
+  final _assistant = AssistantOrchestrator(LocalLlamaGateway());
 
   bool _listening = false;
+  bool _thinking = false;
   String? _status;
+  String? _lastDraft;
 
   @override
   void dispose() {
@@ -42,15 +48,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openTimetableImport() async {
-    final ocrText = await Navigator.of(context).push<String>(
+    final document = await Navigator.of(context).push<OcrDocument>(
       MaterialPageRoute(builder: (_) => const TimetableImportPage()),
     );
-    if (!mounted || ocrText == null || ocrText.trim().isEmpty) return;
+    if (!mounted || document == null || document.fullText.trim().isEmpty) return;
 
-    setState(() {
-      _controller.text = '這是一張課表，請解析以下內容：\n\n$ocrText';
-      _status = 'OCR 已完成，下一步會交給 Schedule Import Skill 解析。';
-    });
+    _controller.text = document.fullText;
+    await _propose(
+      ImageAssistantInput(
+        ocr: document,
+        context: '這是一張家庭成員的學校課表。請使用 schedule-import skill 產生草稿。',
+      ),
+    );
   }
 
   Future<void> _recognizeSpeech() async {
@@ -66,12 +75,13 @@ class _HomePageState extends State<HomePage> {
         onDeviceOnly: onDeviceAvailable,
       );
       if (!mounted) return;
+      _controller.text = transcript.text;
       setState(() {
-        _controller.text = transcript.text;
         _status = onDeviceAvailable
-            ? '語音已由裝置端辨識。'
-            : '此裝置沒有本機語音服務，已使用系統語音辨識服務。';
+            ? '語音已由裝置端辨識，正在交給管家理解。'
+            : '已使用系統語音辨識服務，正在交給管家理解。';
       });
+      await _propose(SpeechAssistantInput(transcript.text));
     } catch (error) {
       if (!mounted) return;
       setState(() => _status = '語音辨識失敗：$error');
@@ -80,12 +90,35 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _submitText() {
+  Future<void> _submitText() async {
     final text = _controller.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _thinking) return;
+    await _propose(TextAssistantInput(text));
+  }
+
+  Future<void> _propose(AssistantInput input) async {
+    if (_thinking) return;
     setState(() {
-      _status = '已收到輸入。下一步接上 AssistantOrchestrator / Local Llama。';
+      _thinking = true;
+      _lastDraft = null;
+      _status = '管家正在產生結構化草稿…';
     });
+
+    try {
+      final draft = await _assistant.propose(input);
+      if (!mounted) return;
+      setState(() {
+        _lastDraft = draft.rawJson;
+        _status = '已取得 FamilyAction 草稿；尚未寫入家庭資料。';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _status = '本機 Llama 尚未就緒或推論失敗：$error';
+      });
+    } finally {
+      if (mounted) setState(() => _thinking = false);
+    }
   }
 
   @override
@@ -110,29 +143,33 @@ class _HomePageState extends State<HomePage> {
                 runSpacing: 12,
                 children: [
                   FilledButton.icon(
-                    onPressed: _openTimetableImport,
+                    onPressed: _thinking ? null : _openTimetableImport,
                     icon: const Icon(Icons.camera_alt_outlined),
                     label: const Text('拍課表'),
                   ),
                   FilledButton.tonalIcon(
-                    onPressed: _listening ? null : _recognizeSpeech,
+                    onPressed: _listening || _thinking ? null : _recognizeSpeech,
                     icon: Icon(_listening ? Icons.mic : Icons.mic_none),
                     label: Text(_listening ? '辨識中…' : '語音'),
                   ),
                   FilledButton.tonalIcon(
-                    onPressed: () => setState(() => _status = '購物清單功能正在接 Repository。'),
+                    onPressed: () => setState(() => _status = '購物清單功能下一步接 JSON Repository。'),
                     icon: const Icon(Icons.shopping_cart_outlined),
                     label: const Text('購物清單'),
                   ),
                   FilledButton.tonalIcon(
-                    onPressed: () => setState(() => _status = '待辦功能正在接 Repository。'),
+                    onPressed: () => setState(() => _status = '待辦功能下一步接 JSON Repository。'),
                     icon: const Icon(Icons.checklist_outlined),
                     label: const Text('待辦'),
                   ),
                 ],
               ),
+              if (_thinking) ...[
+                const SizedBox(height: 18),
+                const LinearProgressIndicator(),
+              ],
               if (_status != null) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(12),
@@ -140,7 +177,21 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ],
-              const Spacer(),
+              if (_lastDraft != null) ...[
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: SingleChildScrollView(
+                        child: SelectableText(_lastDraft!),
+                      ),
+                    ),
+                  ),
+                ),
+              ] else
+                const Spacer(),
+              const SizedBox(height: 12),
               TextField(
                 controller: _controller,
                 minLines: 1,
@@ -149,7 +200,7 @@ class _HomePageState extends State<HomePage> {
                   hintText: '例如：明天有什麼課？',
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
-                    onPressed: _submitText,
+                    onPressed: _thinking ? null : _submitText,
                     icon: const Icon(Icons.send),
                   ),
                 ),
