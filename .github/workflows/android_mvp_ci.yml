@@ -81,23 +81,19 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           disable-animations: true
           script: |
-            set -euo pipefail
             mkdir -p emulator-artifacts
-            adb install -r apk/app-debug.apk
+            adb install -r apk/app-debug.apk | tee emulator-artifacts/adb-install.txt
             adb logcat -c
             adb shell am start -W -n com.householder.app/.MainActivity | tee emulator-artifacts/am-start.txt
             sleep 5
-            PID="$(adb shell pidof com.householder.app | tr -d '\r')"
-            test -n "$PID"
+            adb logcat -d -v threadtime > emulator-artifacts/logcat.txt
+            adb exec-out screencap -p > emulator-artifacts/householder-home.png
+            adb shell pidof com.householder.app | tr -d '\r' | tee emulator-artifacts/pid.txt
+            test -s emulator-artifacts/pid.txt
             adb shell uiautomator dump /sdcard/householder-window.xml
             adb pull /sdcard/householder-window.xml emulator-artifacts/householder-window.xml
             grep -Eq 'HouseHolder|家庭管家' emulator-artifacts/householder-window.xml
-            adb exec-out screencap -p > emulator-artifacts/householder-home.png
-            adb logcat -d -v threadtime > emulator-artifacts/logcat.txt
-            if grep -Eq 'FATAL EXCEPTION|Process: com\.householder\.app.*FATAL' emulator-artifacts/logcat.txt; then
-              echo 'HouseHolder crashed during emulator smoke test.'
-              exit 1
-            fi
+            ! grep -Eq 'FATAL EXCEPTION|Process: com\.householder\.app.*FATAL' emulator-artifacts/logcat.txt
 
       - name: Upload emulator smoke artifacts
         if: always()
