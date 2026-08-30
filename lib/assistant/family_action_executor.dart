@@ -119,10 +119,25 @@ class FamilyActionExecutor {
   }
 
   Future<ActionExecutionResult> _shoppingSetDone(FamilyAction action) async {
-    final id = _requiredString(action.payload, 'id');
     final done = _requiredBool(action.payload, 'done');
+    final id = await _resolveShoppingId(action.payload);
     await _shopping.setDone(id, done);
     return ActionExecutionResult(message: done ? '購物項目已完成。' : '購物項目已重新開啟。');
+  }
+
+  Future<String> _resolveShoppingId(Map<String, Object?> payload) async {
+    final id = _optionalString(payload, 'id');
+    if (id != null) return id;
+    final name = _requiredString(payload, 'name');
+    final items = await _shopping.list(includeDone: true);
+    final matches = items.where((item) => item.name == name).toList();
+    if (matches.isEmpty) {
+      throw StateError('找不到購物項目：$name');
+    }
+    if (matches.length > 1) {
+      throw StateError('購物清單中有多筆同名項目「$name」，請先從清單選擇明確項目。');
+    }
+    return matches.single.id;
   }
 
   Future<ActionExecutionResult> _todoAdd(FamilyAction action) async {
@@ -155,16 +170,40 @@ class FamilyActionExecutor {
   }
 
   Future<ActionExecutionResult> _todoSetDone(FamilyAction action) async {
-    final id = _requiredString(action.payload, 'id');
     final done = _requiredBool(action.payload, 'done');
+    final id = await _resolveTodoId(action.payload);
     await _todos.setDone(id, done);
     return ActionExecutionResult(message: done ? '待辦已完成。' : '待辦已重新開啟。');
+  }
+
+  Future<String> _resolveTodoId(Map<String, Object?> payload) async {
+    final id = _optionalString(payload, 'id');
+    if (id != null) return id;
+    final title = _requiredString(payload, 'title');
+    final items = await _todos.list(includeDone: true);
+    final matches = items.where((item) => item.title == title).toList();
+    if (matches.isEmpty) {
+      throw StateError('找不到待辦：$title');
+    }
+    if (matches.length > 1) {
+      throw StateError('待辦中有多筆同名項目「$title」，請先從清單選擇明確項目。');
+    }
+    return matches.single.id;
   }
 
   String _requiredString(Map<String, Object?> payload, String key) {
     final value = payload[key];
     if (value is! String || value.trim().isEmpty) {
       throw FormatException('$key is required.');
+    }
+    return value.trim();
+  }
+
+  String? _optionalString(Map<String, Object?> payload, String key) {
+    final value = payload[key];
+    if (value == null) return null;
+    if (value is! String || value.trim().isEmpty) {
+      throw FormatException('$key must be a non-empty string when supplied.');
     }
     return value.trim();
   }
