@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -14,13 +13,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
-
     defaultConfig {
         applicationId = "com.householder.app"
-        minSdk = 24
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -33,6 +28,12 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
 flutter {
     source = "../.."
 }
@@ -41,7 +42,6 @@ dependencies {
     // Bundled OCR model: works without waiting for a Play Services download.
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 
-    // Pin to the latest 1.3.x patch while we validate the Android MVP against
-    // the ExecuTorch 1.3 LLM Java API. Upgrade only after device regression tests.
+    // Pin to ExecuTorch 1.3.x while validating the Android LLM Java API.
     implementation("org.pytorch:executorch-android:1.3.1")
 }
