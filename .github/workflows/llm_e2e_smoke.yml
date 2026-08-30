@@ -6,8 +6,8 @@ on:
     branches: [develop]
     paths:
       - '.github/workflows/llm_e2e_smoke.yml'
-      - 'android/app/build.gradle.kts'
-      - 'android/app/src/androidTest/**'
+      - 'scripts/llm_e2e_emulator.sh'
+      - 'android/app/src/debug/**'
       - 'android/app/src/main/kotlin/com/householder/app/RecommendedModelPackDownloader.kt'
       - 'android/app/src/main/kotlin/com/householder/app/LocalLlamaEngine.kt'
 
@@ -35,11 +35,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v5
-        with:
-          gradle-version: '9.3.1'
-
       - name: Install Flutter dependencies
         run: flutter pub get
 
@@ -49,6 +44,9 @@ jobs:
           sudo rm -rf /opt/ghc || true
           sudo rm -rf /usr/local/share/boost || true
           df -h
+
+      - name: Build the same debug APK used by the app
+        run: flutter build apk --debug
 
       - name: Enable KVM
         run: |
@@ -69,21 +67,13 @@ jobs:
           disk-size: 8G
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           disable-animations: true
-          working-directory: ./android
-          script: |
-            gradle app:connectedDebugAndroidTest --no-daemon --stacktrace | tee ../llm-e2e-gradle.txt
-            adb pull /sdcard/Android/data/com.householder.app/files/llm-e2e-output.txt ../llm-e2e-output.txt
-            adb logcat -d -v threadtime > ../llm-e2e-logcat.txt
+          script: bash scripts/llm_e2e_emulator.sh
 
       - name: Upload LLM E2E evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: householder-llm-e2e
-          path: |
-            llm-e2e-gradle.txt
-            llm-e2e-output.txt
-            llm-e2e-logcat.txt
-            android/app/build/reports/androidTests/
+          path: llm-e2e-artifacts/
           if-no-files-found: warn
           retention-days: 7
