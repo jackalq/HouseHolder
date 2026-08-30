@@ -4,6 +4,7 @@ import 'app_services.dart';
 import 'assistant/assistant_orchestrator.dart';
 import 'assistant/family_action.dart';
 import 'assistant/local_llama_gateway.dart';
+import 'features/schedule/schedule_import_models.dart';
 import 'features/schedule/schedule_preview_page.dart';
 import 'features/schedule/timetable_import_page.dart';
 import 'platform/ocr_gateway.dart';
@@ -146,22 +147,22 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final confirmed = await Navigator.of(context).push<bool>(
+    final confirmedDraft = await Navigator.of(context).push<ScheduleImportDraft>(
       MaterialPageRoute(
         builder: (_) => SchedulePreviewPage(draft: scheduleDraft),
       ),
     );
     if (!mounted) return;
-    if (confirmed != true) {
+    if (confirmedDraft == null) {
       setState(() => _status = '課表草稿已取消，沒有寫入家庭資料。');
       return;
     }
 
     setState(() => _status = '正在寫入課表與 ChangeEvent…');
-    await services.schedules.importConfirmed(scheduleDraft);
+    await services.schedules.importConfirmed(confirmedDraft);
     if (!mounted) return;
     setState(() {
-      _status = '課表已寫入 ${scheduleDraft.items.length} 筆；之後可直接詢問明天有什麼課。';
+      _status = '課表已寫入 ${confirmedDraft.items.length} 筆；之後可直接詢問明天有什麼課。';
     });
   }
 
@@ -210,7 +211,9 @@ class _HomePageState extends State<HomePage> {
     try {
       final installed = await _llama.pickModelFile();
       if (!mounted) return;
-      setState(() => _status = installed ? '模型檔已複製到 App 私有儲存空間。' : '已取消選擇模型檔。');
+      setState(() {
+        _status = installed ? '模型檔已複製到 App 私有儲存空間。' : '已取消選擇模型檔。';
+      });
       _refreshModelStatus();
     } catch (error) {
       if (mounted) setState(() => _status = '模型檔安裝失敗：$error');
@@ -278,94 +281,91 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: SafeArea(
-        child: Padding(
+        child: ListView(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                '家庭管家',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              const Text('Android MVP：課表、語音、購物與待辦。'),
-              const SizedBox(height: 12),
-              _ModelStatusCard(
-                status: _modelStatusFuture,
-                busy: _modelBusy,
-                onPickModel: _pickModelFile,
-                onPickTokenizer: _pickTokenizerFile,
-                onDelete: _deleteModelPack,
-              ),
+          children: [
+            const Text(
+              '家庭管家',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            const Text('Android MVP：課表、語音、購物與待辦。'),
+            const SizedBox(height: 12),
+            _ModelStatusCard(
+              status: _modelStatusFuture,
+              busy: _modelBusy,
+              onPickModel: _pickModelFile,
+              onPickTokenizer: _pickTokenizerFile,
+              onDelete: _deleteModelPack,
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: _thinking ? null : _openTimetableImport,
+                  icon: const Icon(Icons.camera_alt_outlined),
+                  label: const Text('拍課表'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _listening || _thinking ? null : _recognizeSpeech,
+                  icon: Icon(_listening ? Icons.mic : Icons.mic_none),
+                  label: Text(_listening ? '辨識中…' : '語音'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _showShopping,
+                  icon: const Icon(Icons.shopping_cart_outlined),
+                  label: const Text('購物清單'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _showTodos,
+                  icon: const Icon(Icons.checklist_outlined),
+                  label: const Text('待辦'),
+                ),
+              ],
+            ),
+            if (_thinking || _modelBusy) ...[
+              const SizedBox(height: 18),
+              const LinearProgressIndicator(),
+            ],
+            if (_status != null) ...[
               const SizedBox(height: 16),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: SelectableText(_status!),
+                ),
+              ),
+            ],
+            if (_lastDraft != null) ...[
+              const SizedBox(height: 8),
+              ExpansionTile(
+                title: const Text('FamilyAction 草稿'),
                 children: [
-                  FilledButton.icon(
-                    onPressed: _thinking ? null : _openTimetableImport,
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    label: const Text('拍課表'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: _listening || _thinking ? null : _recognizeSpeech,
-                    icon: Icon(_listening ? Icons.mic : Icons.mic_none),
-                    label: Text(_listening ? '辨識中…' : '語音'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: _showShopping,
-                    icon: const Icon(Icons.shopping_cart_outlined),
-                    label: const Text('購物清單'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: _showTodos,
-                    icon: const Icon(Icons.checklist_outlined),
-                    label: const Text('待辦'),
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SelectableText(_lastDraft!),
                   ),
                 ],
               ),
-              if (_thinking || _modelBusy) ...[
-                const SizedBox(height: 18),
-                const LinearProgressIndicator(),
-              ],
-              if (_status != null) ...[
-                const SizedBox(height: 16),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: SelectableText(_status!),
-                  ),
-                ),
-              ],
-              if (_lastDraft != null) ...[
-                const SizedBox(height: 8),
-                ExpansionTile(
-                  title: const Text('FamilyAction 草稿'),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: SelectableText(_lastDraft!),
-                    ),
-                  ],
-                ),
-              ],
-              const Spacer(),
-              TextField(
-                controller: _controller,
-                minLines: 1,
-                maxLines: 6,
-                decoration: InputDecoration(
-                  hintText: '例如：明天有什麼課？／記得買牛奶／新增待辦：繳學費',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    onPressed: _thinking ? null : _submitText,
-                    icon: const Icon(Icons.send),
-                  ),
-                ),
-                onSubmitted: (_) => _submitText(),
-              ),
             ],
-          ),
+            const SizedBox(height: 24),
+            TextField(
+              controller: _controller,
+              minLines: 1,
+              maxLines: 6,
+              decoration: InputDecoration(
+                hintText: '例如：明天有什麼課？／記得買牛奶／新增待辦：繳學費',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  onPressed: _thinking ? null : _submitText,
+                  icon: const Icon(Icons.send),
+                ),
+              ),
+              onSubmitted: (_) => _submitText(),
+            ),
+          ],
         ),
       ),
     );
@@ -424,7 +424,11 @@ class _ModelStatusCard extends StatelessWidget {
                 ),
                 if (!model.ready) ...[
                   const SizedBox(height: 6),
-                  Text(model.modelBytes > 0 ? '模型檔已存在，尚缺 tokenizer。' : '請安裝 .pte 模型與 tokenizer。'),
+                  Text(
+                    model.modelBytes > 0
+                        ? '模型檔已存在，尚缺 tokenizer。'
+                        : '請安裝 .pte 模型與 tokenizer。',
+                  ),
                 ],
                 const SizedBox(height: 10),
                 Wrap(
@@ -437,7 +441,9 @@ class _ModelStatusCard extends StatelessWidget {
                     ),
                     OutlinedButton(
                       onPressed: busy ? null : onPickTokenizer,
-                      child: Text(model.tokenizerPath != null ? '更換 tokenizer' : '選擇 tokenizer'),
+                      child: Text(
+                        model.tokenizerPath != null ? '更換 tokenizer' : '選擇 tokenizer',
+                      ),
                     ),
                     if (model.modelBytes > 0 || model.tokenizerPath != null)
                       TextButton(
