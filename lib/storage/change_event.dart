@@ -9,6 +9,8 @@ class ChangeEvent {
     required this.deviceId,
     required this.timestamp,
     this.baseHash,
+    this.alternateBaseHash,
+    this.resolutionOf,
     this.baseData,
     this.value,
     this.patch,
@@ -20,18 +22,18 @@ class ChangeEvent {
   final ChangeOperation operation;
   final String deviceId;
   final DateTime timestamp;
-
-  /// Hash of the entity version the editor observed before making the change.
   final String? baseHash;
 
-  /// Business data for [baseHash]. Required for deterministic three-way merge
-  /// when the current materialized record has advanced independently.
+  /// The other known branch hash for a user-confirmed conflict resolution.
+  /// A resolution is authoritative only while the receiver still has either
+  /// [baseHash] or this hash; newer states are never overwritten silently.
+  final String? alternateBaseHash;
+
+  /// The conflicting operation id explicitly resolved by the user.
+  final String? resolutionOf;
+
   final Map<String, Object?>? baseData;
-
-  /// Full value for create/snapshot operations.
   final Map<String, Object?>? value;
-
-  /// Field-level changes for update operations.
   final Map<String, Object?>? patch;
 
   factory ChangeEvent.fromJson(Map<String, Object?> json) {
@@ -73,6 +75,8 @@ class ChangeEvent {
       deviceId: requiredString('deviceId'),
       timestamp: timestamp,
       baseHash: json['baseHash'] as String?,
+      alternateBaseHash: json['alternateBaseHash'] as String?,
+      resolutionOf: json['resolutionOf'] as String?,
       baseData: object('baseData'),
       value: object('value'),
       patch: object('patch'),
@@ -87,6 +91,8 @@ class ChangeEvent {
         'deviceId': deviceId,
         'timestamp': timestamp.toUtc().toIso8601String(),
         if (baseHash != null) 'baseHash': baseHash,
+        if (alternateBaseHash != null) 'alternateBaseHash': alternateBaseHash,
+        if (resolutionOf != null) 'resolutionOf': resolutionOf,
         if (baseData != null) 'baseData': baseData,
         if (value != null) 'value': value,
         if (patch != null) 'patch': patch,

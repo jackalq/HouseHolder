@@ -23,14 +23,15 @@ class MaterializedEntityStore {
   }
 
   Future<void> append(ChangeEvent event, Map<String, Object?> record) async {
-    final path = switch (event.entityType) {
-      'shoppingItem' => 'shopping/items.jsonl',
-      'todoItem' => 'todos/items.jsonl',
-      'scheduleItem' => _schedulePath(record),
-      _ => throw FormatException('Unsupported sync entity type: ${event.entityType}'),
-    };
-    await _documents.appendJsonLine(path, record);
+    await _documents.appendJsonLine(dataPathFor(event, record), record);
   }
+
+  String dataPathFor(ChangeEvent event, Map<String, Object?> record) => switch (event.entityType) {
+        'shoppingItem' => 'shopping/items.jsonl',
+        'todoItem' => 'todos/items.jsonl',
+        'scheduleItem' => _schedulePath(record),
+        _ => throw FormatException('Unsupported sync entity type: ${event.entityType}'),
+      };
 
   Future<List<String>> _schedulePaths() async {
     final files = await _documents.listFiles('family/children');

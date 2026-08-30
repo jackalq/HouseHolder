@@ -14,8 +14,7 @@ class MergeOutcome {
 
   const MergeOutcome.applied(Map<String, Object?> record)
       : this._(MergeOutcomeKind.applied, record: record);
-  const MergeOutcome.duplicate()
-      : this._(MergeOutcomeKind.duplicate);
+  const MergeOutcome.duplicate() : this._(MergeOutcomeKind.duplicate);
   const MergeOutcome.conflict(String reason, [List<String> fields = const []])
       : this._(MergeOutcomeKind.conflict, reason: reason, conflictingFields: fields);
 }
@@ -27,11 +26,40 @@ class DeterministicMergeEngine {
   final HashService _hashService;
 
   MergeOutcome apply(Map<String, Object?>? currentRecord, ChangeEvent event) {
+    if (event.resolutionOf != null) return _resolution(currentRecord, event);
     return switch (event.operation) {
       ChangeOperation.create => _create(currentRecord, event),
       ChangeOperation.update => _update(currentRecord, event),
       ChangeOperation.delete => _delete(currentRecord, event),
     };
+  }
+
+  MergeOutcome _resolution(Map<String, Object?>? current, ChangeEvent event) {
+    if (current == null) return const MergeOutcome.conflict('Resolution target does not exist.');
+    final currentHash = current['hash'];
+    if (currentHash != event.baseHash && currentHash != event.alternateBaseHash) {
+      return const MergeOutcome.conflict('Conflict resolution is stale because the entity changed again.');
+    }
+
+    if (event.operation == ChangeOperation.delete) {
+      if (current['deleted'] == true) return const MergeOutcome.duplicate();
+      return MergeOutcome.applied({
+        ...current,
+        'version': (current['version'] as int? ?? 1) + 1,
+        'modifiedBy': event.deviceId,
+        'modifiedAt': event.timestamp.toUtc().toIso8601String(),
+        'deleted': true,
+      });
+    }
+
+    final patch = event.patch;
+    if (patch == null) return const MergeOutcome.conflict('Resolution update has no resolved values.');
+    final currentData = _dataOf(current);
+    final nextData = <String, Object?>{...currentData, ...patch};
+    if (current['deleted'] != true && _same(currentData, nextData)) {
+      return const MergeOutcome.duplicate();
+    }
+    return MergeOutcome.applied(_nextRecord(current, nextData, event));
   }
 
   MergeOutcome _create(Map<String, Object?>? current, ChangeEvent event) {
@@ -61,7 +89,8 @@ class DeterministicMergeEngine {
     final remoteChanged = _changedFields(baseData, {...baseData, ...patch});
     final overlap = localChanged.intersection(remoteChanged).where((field) {
       return !_same(currentData[field], patch[field]);
-    }).toList()..sort();
+    }).toList()
+      ..sort();
 
     if (overlap.isNotEmpty) {
       return MergeOutcome.conflict('Same-field concurrent update.', overlap);

@@ -79,13 +79,25 @@ class _SyncPageState extends State<SyncPage> {
     });
   }
 
-  Future<void> _keepLocal(SyncConflict conflict) async {
-    await widget.services.conflicts.keepLocal(conflict);
-    if (!mounted) return;
-    setState(() {
-      _message = '衝突已保留本機版本並結案。';
-      _refresh();
-    });
+  Future<void> _resolve(SyncConflict conflict, {required bool remote}) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      if (remote) {
+        await widget.services.conflicts.acceptRemote(conflict);
+      } else {
+        await widget.services.conflicts.keepLocal(conflict);
+      }
+      if (!mounted) return;
+      setState(() {
+        _message = remote ? '已採用遠端版本；決議會在下次同步傳給另一支手機。' : '已保留本機版本；決議會在下次同步傳給另一支手機。';
+        _refresh();
+      });
+    } catch (error) {
+      if (mounted) setState(() => _message = '解決衝突失敗：$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -96,10 +108,7 @@ class _SyncPageState extends State<SyncPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text(
-              '共享資料夾',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-            ),
+            const Text('共享資料夾', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             const Text(
               '先在 Google Drive 建立並分享一個 HouseHolder 資料夾。兩支 Android 手機都用下方按鈕選擇同一個資料夾。'
@@ -110,9 +119,7 @@ class _SyncPageState extends State<SyncPage> {
               future: _treeStatus,
               builder: (context, snapshot) {
                 final value = snapshot.data;
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const LinearProgressIndicator();
-                }
+                if (snapshot.connectionState != ConnectionState.done) return const LinearProgressIndicator();
                 return Card(
                   child: Padding(
                     padding: const EdgeInsets.all(12),
@@ -139,10 +146,7 @@ class _SyncPageState extends State<SyncPage> {
                               child: const Text('立即同步'),
                             ),
                             if (value?.configured == true)
-                              TextButton(
-                                onPressed: _busy ? null : _disconnect,
-                                child: const Text('移除授權'),
-                              ),
+                              TextButton(onPressed: _busy ? null : _disconnect, child: const Text('移除授權')),
                           ],
                         ),
                       ],
@@ -160,31 +164,46 @@ class _SyncPageState extends State<SyncPage> {
               Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(_message!))),
             ],
             const SizedBox(height: 24),
-            const Text(
-              '同步衝突',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-            ),
+            const Text('同步衝突', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             FutureBuilder<List<SyncConflict>>(
               future: _conflicts,
               builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const LinearProgressIndicator();
-                }
+                if (snapshot.connectionState != ConnectionState.done) return const LinearProgressIndicator();
                 final conflicts = snapshot.data ?? const [];
                 if (conflicts.isEmpty) return const Text('目前沒有未處理衝突。');
                 return Column(
                   children: conflicts.map((conflict) {
-                    final fields = conflict.conflictingFields.isEmpty
-                        ? ''
-                        : '\n欄位：${conflict.conflictingFields.join('、')}';
+                    final comparisons = conflict.comparisonLines();
                     return Card(
-                      child: ListTile(
-                        title: Text('${conflict.entityType} · ${conflict.entityId}'),
-                        subtitle: Text('${conflict.reason}$fields'),
-                        trailing: TextButton(
-                          onPressed: _busy ? null : () => _keepLocal(conflict),
-                          child: const Text('保留本機'),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${conflict.entityType} · ${conflict.entityId}',
+                                style: const TextStyle(fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 4),
+                            Text(conflict.reason),
+                            for (final line in comparisons) Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(line),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                OutlinedButton(
+                                  onPressed: _busy ? null : () => _resolve(conflict, remote: false),
+                                  child: const Text('保留本機'),
+                                ),
+                                FilledButton.tonal(
+                                  onPressed: _busy ? null : () => _resolve(conflict, remote: true),
+                                  child: const Text('採用遠端'),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     );

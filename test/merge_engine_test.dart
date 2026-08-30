@@ -56,4 +56,46 @@ void main() {
     expect(outcome.kind, MergeOutcomeKind.conflict);
     expect(outcome.conflictingFields, ['quantity']);
   });
+
+  test('user resolution can replace either known conflict branch', () {
+    final local = <String, Object?>{'name': '牛奶', 'quantity': 2};
+    final remote = <String, Object?>{'name': '牛奶', 'quantity': 3};
+    final event = ChangeEvent(
+      opId: 'resolution-1',
+      entityType: 'shoppingItem',
+      entityId: 'x',
+      operation: ChangeOperation.update,
+      deviceId: 'a',
+      timestamp: DateTime.utc(2026, 8, 30, 2),
+      baseHash: hashes.contentHash(local),
+      alternateBaseHash: hashes.contentHash(remote),
+      resolutionOf: 'op-conflict',
+      baseData: local,
+      patch: {'quantity': 2},
+    );
+    final outcome = engine.apply(record(remote), event);
+    expect(outcome.kind, MergeOutcomeKind.applied);
+    expect((outcome.record!['data'] as Map)['quantity'], 2);
+  });
+
+  test('stale user resolution cannot overwrite a newer third state', () {
+    final local = <String, Object?>{'name': '牛奶', 'quantity': 2};
+    final remote = <String, Object?>{'name': '牛奶', 'quantity': 3};
+    final newer = <String, Object?>{'name': '牛奶', 'quantity': 4};
+    final event = ChangeEvent(
+      opId: 'resolution-1',
+      entityType: 'shoppingItem',
+      entityId: 'x',
+      operation: ChangeOperation.update,
+      deviceId: 'a',
+      timestamp: DateTime.utc(2026, 8, 30, 2),
+      baseHash: hashes.contentHash(local),
+      alternateBaseHash: hashes.contentHash(remote),
+      resolutionOf: 'op-conflict',
+      baseData: local,
+      patch: {'quantity': 2},
+    );
+    final outcome = engine.apply(record(newer), event);
+    expect(outcome.kind, MergeOutcomeKind.conflict);
+  });
 }

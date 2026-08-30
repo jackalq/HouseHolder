@@ -38,30 +38,21 @@ class AppServices {
 
   static Future<AppServices> bootstrap() async {
     final appDocuments = await getApplicationDocumentsDirectory();
-    final documents = JsonDocumentRepository(
-      Directory('${appDocuments.path}/HouseHolder'),
-    );
+    final documents = JsonDocumentRepository(Directory('${appDocuments.path}/HouseHolder'));
     final deviceIdentity = DeviceIdentity(documents);
     await deviceIdentity.getOrCreate();
-    final writer = EntityEventWriter(
-      documents: documents,
-      deviceIdentity: deviceIdentity,
-    );
+    final writer = EntityEventWriter(documents: documents, deviceIdentity: deviceIdentity);
     final schedules = ScheduleRepository(documents: documents, writer: writer);
     final shopping = ShoppingRepository(documents: documents, writer: writer);
     final todos = TodoRepository(documents: documents, writer: writer);
-    final actions = FamilyActionExecutor(
-      schedules: schedules,
-      shopping: shopping,
-      todos: todos,
-    );
+    final actions = FamilyActionExecutor(schedules: schedules, shopping: shopping, todos: todos);
     final syncTransport = AndroidSafSyncTransport();
     final sync = HouseholdSyncService(
       documents: documents,
       deviceIdentity: deviceIdentity,
       transport: syncTransport,
     );
-    final conflicts = SyncConflictInbox(documents);
+    final conflicts = SyncConflictInbox(documents: documents, writer: writer);
     return AppServices._(
       documents: documents,
       deviceIdentity: deviceIdentity,

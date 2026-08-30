@@ -36,7 +36,6 @@ class EntityEventWriter {
       'modifiedAt': now.toIso8601String(),
       'deleted': false,
     };
-
     await _documents.appendJsonLine(dataPath, record);
     await _appendEvent(
       ChangeEvent(
@@ -64,19 +63,8 @@ class EntityEventWriter {
   }) async {
     final deviceId = await _deviceIdentity.getOrCreate();
     final now = DateTime.now().toUtc();
-    final previousHash = currentRecord['hash'] as String?;
-    final currentVersion = currentRecord['version'] as int? ?? 1;
     final currentData = _dataOf(currentRecord);
-    final nextRecord = <String, Object?>{
-      ...currentRecord,
-      'version': currentVersion + 1,
-      'data': nextData,
-      'hash': _hashService.contentHash(nextData),
-      'modifiedBy': deviceId,
-      'modifiedAt': now.toIso8601String(),
-      'deleted': false,
-    };
-
+    final nextRecord = _nextRecord(currentRecord, nextData, deviceId, now, deleted: false);
     await _documents.appendJsonLine(dataPath, nextRecord);
     await _appendEvent(
       ChangeEvent(
@@ -86,7 +74,7 @@ class EntityEventWriter {
         operation: ChangeOperation.update,
         deviceId: deviceId,
         timestamp: now,
-        baseHash: previousHash,
+        baseHash: currentRecord['hash'] as String?,
         baseData: currentData,
         patch: patch,
       ),
@@ -104,14 +92,8 @@ class EntityEventWriter {
   }) async {
     final deviceId = await _deviceIdentity.getOrCreate();
     final now = DateTime.now().toUtc();
-    final currentVersion = currentRecord['version'] as int? ?? 1;
-    final nextRecord = <String, Object?>{
-      ...currentRecord,
-      'version': currentVersion + 1,
-      'modifiedBy': deviceId,
-      'modifiedAt': now.toIso8601String(),
-      'deleted': true,
-    };
+    final currentData = _dataOf(currentRecord);
+    final nextRecord = _nextRecord(currentRecord, currentData, deviceId, now, deleted: true);
     await _documents.appendJsonLine(dataPath, nextRecord);
     await _appendEvent(
       ChangeEvent(
@@ -122,13 +104,65 @@ class EntityEventWriter {
         deviceId: deviceId,
         timestamp: now,
         baseHash: currentRecord['hash'] as String?,
-        baseData: _dataOf(currentRecord),
+        baseData: currentData,
       ),
       deviceId,
       now,
     );
     return nextRecord;
   }
+
+  Future<Map<String, Object?>> appendConflictResolution({
+    required String entityType,
+    required String entityId,
+    required String dataPath,
+    required Map<String, Object?> currentRecord,
+    required String resolutionOf,
+    required String? alternateBaseHash,
+    required Map<String, Object?> nextData,
+    required Map<String, Object?> patch,
+    bool deleted = false,
+  }) async {
+    final deviceId = await _deviceIdentity.getOrCreate();
+    final now = DateTime.now().toUtc();
+    final currentData = _dataOf(currentRecord);
+    final nextRecord = _nextRecord(currentRecord, nextData, deviceId, now, deleted: deleted);
+    await _documents.appendJsonLine(dataPath, nextRecord);
+    await _appendEvent(
+      ChangeEvent(
+        opId: _opId(deviceId, entityId, now),
+        entityType: entityType,
+        entityId: entityId,
+        operation: deleted ? ChangeOperation.delete : ChangeOperation.update,
+        deviceId: deviceId,
+        timestamp: now,
+        baseHash: currentRecord['hash'] as String?,
+        alternateBaseHash: alternateBaseHash,
+        resolutionOf: resolutionOf,
+        baseData: currentData,
+        if (!deleted) patch: patch,
+      ),
+      deviceId,
+      now,
+    );
+    return nextRecord;
+  }
+
+  Map<String, Object?> _nextRecord(
+    Map<String, Object?> currentRecord,
+    Map<String, Object?> data,
+    String deviceId,
+    DateTime now, {
+    required bool deleted,
+  }) => <String, Object?>{
+        ...currentRecord,
+        'version': (currentRecord['version'] as int? ?? 1) + 1,
+        'data': data,
+        'hash': _hashService.contentHash(data),
+        'modifiedBy': deviceId,
+        'modifiedAt': now.toIso8601String(),
+        'deleted': deleted,
+      };
 
   Map<String, Object?> _dataOf(Map<String, Object?> record) {
     final raw = record['data'];
