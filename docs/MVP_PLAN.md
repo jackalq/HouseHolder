@@ -4,11 +4,24 @@
 
 A privacy-first household butler for two adults sharing household knowledge. Input should be low-friction: photo, voice, or text. Llama 3.2 3B Instruct runs locally and converts natural language into validated structured actions.
 
+## First MVP platform
+
+The first executable MVP targets **Android only**.
+
+Flutter remains the application framework so the shared Dart/domain layer can later be reused for iOS, but all platform-specific MVP integration work is Android-first:
+- Android on-device OCR.
+- Android speech-to-text.
+- Android ExecuTorch / local Llama integration.
+- Android file/storage integration.
+- Android Google Drive integration and end-to-end device testing.
+
+The iOS shell and adapters are intentionally postponed until the Android vertical slice is validated.
+
 ## V1 scope
 
 ### Inputs
 - Photo: on-device OCR, initially optimized for school timetables.
-- Voice: platform speech-to-text, then normal text pipeline.
+- Voice: Android speech-to-text, then normal text pipeline.
 - Text: direct conversation/input.
 
 ### Household capabilities
@@ -34,7 +47,8 @@ A privacy-first household butler for two adults sharing household knowledge. Inp
 - LLM interprets preferences; deterministic code calculates money, shipping, constraints and ranking.
 - V1 stops at purchase links/cart handoff. No autonomous checkout.
 
-## Non-goals for V1
+## Non-goals for the first MVP
+- iOS platform integration.
 - Autonomous payment or checkout.
 - Arbitrary generated executable code for new skills.
 - Perfect OCR for every document layout.
@@ -55,21 +69,22 @@ The model never directly writes files, Drive data, credentials, or shopping cart
 - Implement JSON repository abstraction.
 - Implement Skill and Format registries.
 
-### M1 — Local household MVP
+### M1 — Android local household MVP
+- Generate/complete Android Flutter platform shell.
 - Child/schedule format.
 - Shopping/todo formats.
 - CRUD FamilyActions.
-- Query pipeline through local Llama gateway.
+- Query pipeline through Android local Llama gateway.
 - Basic Flutter screens.
 
-### M2 — Photo + voice
-- OCR adapter and timetable import preview.
-- Speech-to-text adapter.
+### M2 — Android photo + voice
+- Android on-device OCR adapter and timetable import preview.
+- Android speech-to-text adapter.
 - Confirmation UI before imported data is committed.
 
 ### M3 — Shared household
 - Per-device append-only event log.
-- Drive transport adapter.
+- Google Drive transport adapter on Android.
 - Hash/baseHash optimistic concurrency.
 - Deterministic merge and conflict UI.
 - Semantic merge proposals for unresolved conflicts.
@@ -81,11 +96,28 @@ The model never directly writes files, Drive data, credentials, or shopping cart
 - Shipping-aware basket optimizer.
 - Purchase-link handoff.
 
-## MVP acceptance examples
+### M5 — iOS port
+- Reuse Dart/domain/JSON/Skill/Format layers.
+- Add iOS OCR and speech adapters.
+- Add iOS ExecuTorch integration.
+- Validate Drive sync interoperability between Android and iOS.
 
-1. Photograph a timetable, review parsed classes, confirm, then ask: `明天小孩有什麼課？`
-2. Say: `記得買牛奶、雞蛋和衛生紙`, then another household member sees the synchronized list.
-3. Both devices edit different fields offline and merge automatically after reconnecting.
-4. Same-field conflicts are not silently overwritten.
-5. Ask for shopping comparison and receive one-stop vs lowest-delivered-total plans with source purchase links.
-6. Add a declarative Skill/Format without modifying the core assistant orchestrator.
+## First Android vertical-slice acceptance target
+
+1. Install and launch HouseHolder on a physical Android phone.
+2. Photograph a timetable.
+3. Run OCR locally and show the extracted timetable for review.
+4. Convert reviewed OCR content into validated ScheduleItems.
+5. Confirm and persist them to the hierarchical JSON repository.
+6. Ask by text or voice: `明天小孩有什麼課？`
+7. Resolve the answer from household data rather than model memory.
+8. Add shopping/todo items by voice or text.
+9. Persist changes as append-only device events.
+
+## Later MVP acceptance examples
+
+- Another household member sees synchronized data through Google Drive.
+- Two Android devices edit different fields offline and merge automatically after reconnecting.
+- Same-field conflicts are not silently overwritten.
+- Shopping comparison returns one-stop vs lowest-delivered-total plans with source purchase links.
+- A declarative Skill/Format can be added without modifying the core assistant orchestrator.
