@@ -9,6 +9,8 @@ on:
       - '.github/workflows/android_mvp_ci.yml'
       - '.github/workflows/android_emulator_smoke.yml'
       - 'scripts/llm_e2e_emulator.sh'
+      - 'lib/main.dart'
+      - 'lib/features/model/recommended_model_installer.dart'
       - 'android/app/build.gradle.kts'
       - 'android/app/src/debug/**'
       - 'android/app/src/main/kotlin/com/householder/app/RecommendedModelPackDownloader.kt'
