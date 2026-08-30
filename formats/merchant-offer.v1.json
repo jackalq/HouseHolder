@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "householder://formats/merchant-offer/v1",
+  "type": "object",
+  "required": ["merchantId", "merchantName", "title", "unitPriceTwd", "url"],
+  "properties": {
+    "merchantId": {"type": "string", "minLength": 1},
+    "merchantName": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "unitPriceTwd": {"type": "integer", "minimum": 1},
+    "shippingFlatTwd": {"type": "integer", "minimum": 0, "default": 0},
+    "freeShippingThresholdTwd": {"type": ["integer", "null"], "minimum": 0},
+    "url": {"type": "string", "format": "uri"},
+    "observedAt": {"type": ["string", "null"], "format": "date-time"},
+    "inStock": {"type": "boolean", "default": true}
+  },
+  "additionalProperties": false
+}

@@ -140,7 +140,7 @@ class EntityEventWriter {
         alternateBaseHash: alternateBaseHash,
         resolutionOf: resolutionOf,
         baseData: currentData,
-        if (!deleted) patch: patch,
+        patch: deleted ? null : patch,
       ),
       deviceId,
       now,
