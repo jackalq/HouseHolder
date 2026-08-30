@@ -31,9 +31,9 @@ class MainActivity : FlutterActivity() {
         private const val AUDIO_PERMISSION_REQUEST = 7101
         private const val MODEL_FILE_REQUEST = 7201
         private const val TOKENIZER_FILE_REQUEST = 7202
-        private const val MODEL_DIRECTORY = "model-pack"
-        private const val MODEL_FILE = "llama32-3b-instruct.pte"
-        private const val TOKENIZER_FILE = "tokenizer.bin"
+        private const val MODEL_DIRECTORY = RecommendedModelPackDownloader.MODEL_DIRECTORY
+        private const val MODEL_FILE = RecommendedModelPackDownloader.MODEL_FILE
+        private const val TOKENIZER_FILE = RecommendedModelPackDownloader.TOKENIZER_FILE
     }
 
     private var speechRecognizer: SpeechRecognizer? = null
@@ -42,11 +42,13 @@ class MainActivity : FlutterActivity() {
     private var pendingFilePickResult: MethodChannel.Result? = null
     private val fileExecutor = Executors.newSingleThreadExecutor()
     private lateinit var llamaEngine: LocalLlamaEngine
+    private lateinit var recommendedDownloader: RecommendedModelPackDownloader
     private lateinit var syncTree: SafSyncTree
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         llamaEngine = LocalLlamaEngine(this)
+        recommendedDownloader = RecommendedModelPackDownloader(this)
         syncTree = SafSyncTree(this)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OCR_CHANNEL)
@@ -85,6 +87,9 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "isModelReady" -> result.success(llamaEngine.status().ready)
                     "modelStatus" -> result.success(llamaEngine.status().toMap())
+                    "recommendedModelInfo" -> result.success(recommendedDownloader.info())
+                    "recommendedDownloadStatus" -> result.success(recommendedDownloader.status())
+                    "downloadRecommendedModelPack" -> downloadRecommendedModelPack(result)
                     "pickModelFile" -> startModelFilePicker(MODEL_FILE_REQUEST, result)
                     "pickTokenizerFile" -> startModelFilePicker(TOKENIZER_FILE_REQUEST, result)
                     "deleteModelPack" -> {
@@ -148,6 +153,28 @@ class MainActivity : FlutterActivity() {
             }
     }
 
+    private fun downloadRecommendedModelPack(result: MethodChannel.Result) {
+        llamaEngine.close()
+        fileExecutor.execute {
+            try {
+                recommendedDownloader.downloadAndInstall()
+                runOnUiThread {
+                    llamaEngine = LocalLlamaEngine(this)
+                    result.success(llamaEngine.status().toMap())
+                }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    llamaEngine = LocalLlamaEngine(this)
+                    result.error(
+                        "MODEL_DOWNLOAD_FAILED",
+                        error.message ?: error.javaClass.simpleName,
+                        recommendedDownloader.status(),
+                    )
+                }
+            }
+        }
+    }
+
     private fun runFileTask(result: MethodChannel.Result, block: () -> Any?) {
         fileExecutor.execute {
             try {
@@ -179,9 +206,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (::syncTree.isInitialized && syncTree.handleActivityResult(requestCode, resultCode, data)) {
-            return
-        }
+        if (::syncTree.isInitialized && syncTree.handleActivityResult(requestCode, resultCode, data)) return
         if (requestCode == MODEL_FILE_REQUEST || requestCode == TOKENIZER_FILE_REQUEST) {
             val callback = pendingFilePickResult
             pendingFilePickResult = null
@@ -201,11 +226,7 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
     }
 
-    private fun copyModelDocument(
-        uri: Uri,
-        requestCode: Int,
-        callback: MethodChannel.Result,
-    ) {
+    private fun copyModelDocument(uri: Uri, requestCode: Int, callback: MethodChannel.Result) {
         val metadata = documentMetadata(uri)
         if (requestCode == MODEL_FILE_REQUEST &&
             metadata.first != null &&
@@ -275,18 +296,13 @@ class MainActivity : FlutterActivity() {
             result.error("IMAGE_NOT_FOUND", "Image does not exist", imagePath)
             return
         }
-
         val image = try {
             InputImage.fromFilePath(this, Uri.fromFile(file))
         } catch (error: Exception) {
             result.error("IMAGE_DECODE_FAILED", error.message, null)
             return
         }
-
-        val recognizer = TextRecognition.getClient(
-            ChineseTextRecognizerOptions.Builder().build()
-        )
-
+        val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
         recognizer.process(image)
             .addOnSuccessListener { text ->
                 val blocks = text.textBlocks.map { block ->
@@ -299,35 +315,21 @@ class MainActivity : FlutterActivity() {
                         "bottom" to box?.bottom?.toDouble()
                     )
                 }
-                result.success(
-                    mapOf(
-                        "fullText" to text.text,
-                        "blocks" to blocks
-                    )
-                )
+                result.success(mapOf("fullText" to text.text, "blocks" to blocks))
             }
-            .addOnFailureListener { error ->
-                result.error("OCR_FAILED", error.message, null)
-            }
-            .addOnCompleteListener {
-                recognizer.close()
-            }
+            .addOnFailureListener { error -> result.error("OCR_FAILED", error.message, null) }
+            .addOnCompleteListener { recognizer.close() }
     }
 
-    private fun beginSpeechRecognition(
-        onDeviceOnly: Boolean,
-        result: MethodChannel.Result
-    ) {
+    private fun beginSpeechRecognition(onDeviceOnly: Boolean, result: MethodChannel.Result) {
         if (pendingSpeechResult != null) {
             result.error("SPEECH_BUSY", "Speech recognition is already running", null)
             return
         }
-
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             result.error("SPEECH_UNAVAILABLE", "No speech recognition service is available", null)
             return
         }
-
         if (onDeviceOnly && (
                 Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
                     !SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
@@ -343,12 +345,10 @@ class MainActivity : FlutterActivity() {
 
         pendingSpeechResult = result
         pendingOnDeviceOnly = onDeviceOnly
-
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), AUDIO_PERMISSION_REQUEST)
             return
         }
-
         startRecognizer(onDeviceOnly)
     }
 
@@ -368,11 +368,9 @@ class MainActivity : FlutterActivity() {
             override fun onEndOfSpeech() = Unit
             override fun onPartialResults(partialResults: Bundle?) = Unit
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
-
             override fun onError(error: Int) {
                 finishSpeechError("SPEECH_ERROR_$error", "Speech recognition failed with code $error")
             }
-
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = matches?.firstOrNull().orEmpty()
@@ -398,7 +396,6 @@ class MainActivity : FlutterActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != AUDIO_PERMISSION_REQUEST) return
-
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             startRecognizer(pendingOnDeviceOnly)
         } else {
