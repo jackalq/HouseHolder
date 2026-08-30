@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "householder://formats/schedule-item/v1",
+  "title": "ScheduleItem",
+  "type": "object",
+  "required": ["id", "childId", "dayOfWeek", "subject", "validFrom"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "childId": {"type": "string", "minLength": 1},
+    "dayOfWeek": {"type": "integer", "minimum": 1, "maximum": 7},
+    "startTime": {"type": ["string", "null"], "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"},
+    "endTime": {"type": ["string", "null"], "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"},
+    "period": {"type": ["integer", "null"], "minimum": 1},
+    "subject": {"type": "string", "minLength": 1},
+    "teacher": {"type": ["string", "null"]},
+    "location": {"type": ["string", "null"]},
+    "note": {"type": ["string", "null"]},
+    "validFrom": {"type": "string", "format": "date"},
+    "validUntil": {"type": ["string", "null"], "format": "date"}
+  },
+  "additionalProperties": false
+}
