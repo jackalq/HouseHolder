@@ -48,14 +48,20 @@ jobs:
             adb logcat -c
             adb shell am start -W -n com.householder.app/.MainActivity | tee emulator-artifacts/am-start.txt
             sleep 5
+            adb logcat -d -v threadtime > emulator-artifacts/logcat.txt
+            adb exec-out screencap -p > emulator-artifacts/householder-home.png || true
             PID="$(adb shell pidof com.householder.app | tr -d '\r')"
             echo "$PID" | tee emulator-artifacts/pid.txt
-            test -n "$PID"
-            adb shell uiautomator dump /sdcard/householder-window.xml
-            adb pull /sdcard/householder-window.xml emulator-artifacts/householder-window.xml
+            if [ -n "$PID" ]; then
+              adb shell uiautomator dump /sdcard/householder-window.xml || true
+              adb pull /sdcard/householder-window.xml emulator-artifacts/householder-window.xml || true
+            fi
+            if [ -z "$PID" ]; then
+              echo 'HouseHolder process exited after launch.'
+              grep -E -A 40 -B 10 'FATAL EXCEPTION|AndroidRuntime|com\.householder\.app' emulator-artifacts/logcat.txt | tail -n 160 || true
+              exit 1
+            fi
             grep -Eq 'HouseHolder|家庭管家' emulator-artifacts/householder-window.xml
-            adb exec-out screencap -p > emulator-artifacts/householder-home.png
-            adb logcat -d -v threadtime > emulator-artifacts/logcat.txt
             if grep -Eq 'FATAL EXCEPTION|Process: com\.householder\.app.*FATAL' emulator-artifacts/logcat.txt; then
               echo 'HouseHolder crashed during emulator smoke test.'
               exit 1
