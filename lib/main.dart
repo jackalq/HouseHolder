@@ -1,10 +1,19 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'assistant/assistant_orchestrator.dart';
+import 'assistant/family_action.dart';
 import 'assistant/local_llama_gateway.dart';
+import 'features/schedule/schedule_import_models.dart';
+import 'features/schedule/schedule_preview_page.dart';
+import 'features/schedule/schedule_repository.dart';
 import 'features/schedule/timetable_import_page.dart';
 import 'platform/ocr_gateway.dart';
 import 'platform/speech_gateway.dart';
+import 'storage/device_identity.dart';
+import 'storage/json_repository.dart';
 
 void main() {
   runApp(const HouseHolderApp());
@@ -35,6 +44,7 @@ class _HomePageState extends State<HomePage> {
   final _controller = TextEditingController();
   final _speech = SpeechGateway();
   final _assistant = AssistantOrchestrator(LocalLlamaGateway());
+  final _actionParser = const FamilyActionParser();
 
   bool _listening = false;
   bool _thinking = false;
@@ -107,18 +117,61 @@ class _HomePageState extends State<HomePage> {
     try {
       final draft = await _assistant.propose(input);
       if (!mounted) return;
-      setState(() {
-        _lastDraft = draft.rawJson;
-        _status = '已取得 FamilyAction 草稿；尚未寫入家庭資料。';
-      });
+      setState(() => _lastDraft = draft.rawJson);
+      await _handleDraft(draft.rawJson);
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _status = '本機 Llama 尚未就緒或推論失敗：$error';
-      });
+      setState(() => _status = '本機 Llama 尚未就緒或推論失敗：$error');
     } finally {
       if (mounted) setState(() => _thinking = false);
     }
+  }
+
+  Future<void> _handleDraft(String rawJson) async {
+    final action = _actionParser.parse(rawJson);
+
+    if (action.type != 'schedule.import') {
+      if (!mounted) return;
+      setState(() {
+        _status = '已驗證 FamilyAction：${action.type}。目前 MVP 先完成 schedule.import 寫入流程。';
+      });
+      return;
+    }
+
+    if (!action.requiresConfirmation) {
+      throw const FormatException('schedule.import must require confirmation.');
+    }
+
+    final scheduleDraft = ScheduleImportDraft.fromPayload(action.payload);
+    if (!mounted) return;
+
+    final confirmed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => SchedulePreviewPage(draft: scheduleDraft),
+      ),
+    );
+    if (!mounted) return;
+
+    if (confirmed != true) {
+      setState(() => _status = '課表草稿已取消，沒有寫入家庭資料。');
+      return;
+    }
+
+    setState(() => _status = '正在寫入本機家庭資料與變更事件…');
+    final appDocuments = await getApplicationDocumentsDirectory();
+    final documents = JsonDocumentRepository(
+      Directory('${appDocuments.path}/HouseHolder'),
+    );
+    final repository = ScheduleRepository(
+      documents: documents,
+      deviceIdentity: DeviceIdentity(documents),
+    );
+    await repository.importConfirmed(scheduleDraft);
+
+    if (!mounted) return;
+    setState(() {
+      _status = '課表已確認並寫入 ${scheduleDraft.items.length} 筆；ChangeEvent 也已建立。';
+    });
   }
 
   @override
