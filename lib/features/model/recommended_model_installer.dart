@@ -100,22 +100,9 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
 
+    LocalModelStatus status;
     try {
-      final status = await _llama.downloadRecommendedModelPack();
-      if (!mounted) return;
-      _pollTimer?.cancel();
-      setState(() {
-        _busy = false;
-        _downloadStatus = null;
-      });
-      widget.onInstalled();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            status.ready ? '推薦模型已下載並完成驗證。' : '下載完成，但模型狀態仍未就緒。',
-          ),
-        ),
-      );
+      status = await _llama.downloadRecommendedModelPack();
     } catch (error) {
       if (!mounted) return;
       _pollTimer?.cancel();
@@ -123,7 +110,33 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
         _busy = false;
         _error = '推薦模型下載失敗：$error';
       });
+      return;
     }
+
+    if (!mounted) return;
+    _pollTimer?.cancel();
+    setState(() {
+      _busy = false;
+      _downloadStatus = null;
+      _error = null;
+    });
+
+    try {
+      widget.onInstalled();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = '模型已安裝，但畫面狀態刷新失敗：$error');
+      }
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          status.ready ? '推薦模型已下載並完成驗證。' : '下載完成，但模型狀態仍未就緒。',
+        ),
+      ),
+    );
   }
 
   Future<void> _poll() async {
