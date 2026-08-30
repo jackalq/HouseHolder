@@ -3,20 +3,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../platform/ocr_gateway.dart';
 
-class TimetableImportResult {
-  const TimetableImportResult({
-    required this.document,
-    required this.childId,
-    required this.validFrom,
-    this.validUntil,
-  });
-
-  final OcrDocument document;
-  final String childId;
-  final String validFrom;
-  final String? validUntil;
-}
-
 class TimetableImportPage extends StatefulWidget {
   const TimetableImportPage({super.key});
 
@@ -105,17 +91,17 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
     }
 
     final reviewed = OcrDocument(
-      fullText: text,
+      fullText: '''
+HOUSEHOLDER_IMPORT_CONTEXT:
+childId=$childId
+validFrom=$validFrom
+validUntil=${validUntilText.isEmpty ? 'null' : validUntilText}
+OCR_TEXT:
+$text
+'''.trim(),
       blocks: _document?.blocks ?? const [],
     );
-    Navigator.of(context).pop(
-      TimetableImportResult(
-        document: reviewed,
-        childId: childId,
-        validFrom: validFrom,
-        validUntil: validUntilText.isEmpty ? null : validUntilText,
-      ),
-    );
+    Navigator.of(context).pop(reviewed);
   }
 
   void _showError(String message) {
