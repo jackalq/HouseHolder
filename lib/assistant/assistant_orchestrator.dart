@@ -26,11 +26,6 @@ class FamilyActionDraft {
   final String rawJson;
 }
 
-/// One entry point for text, speech and image/OCR input.
-///
-/// The orchestrator may ask the local model to propose structured actions, but
-/// it never applies them directly. Schema validation, confirmation and storage
-/// belong to the application layer.
 class AssistantOrchestrator {
   const AssistantOrchestrator(this._llama);
 
@@ -43,45 +38,40 @@ class AssistantOrchestrator {
       ImageAssistantInput(:final ocr, :final context) => _imagePrompt(ocr, context),
     };
 
+    final now = DateTime.now();
+    final today = _date(now);
     final prompt = '''
-You are HouseHolder's local planning model.
-Return exactly one JSON object and no Markdown.
-Do not claim an action has already been applied.
-Never invent household facts absent from the supplied input/context.
+You are HouseHolder's local planning model. You NEVER answer household facts from memory.
+Return exactly one JSON object and no prose or markdown.
+Current local date: $today
+Current local weekday: ${now.weekday} (Monday=1, Sunday=7)
 
-FamilyAction envelope:
-{
-  "type": "...",
-  "requiresConfirmation": true,
-  "payload": {}
-}
-
-For timetable OCR, type MUST be "schedule.import", requiresConfirmation MUST be true,
-and payload MUST have this shape:
-{
-  "items": [
-    {
-      "id": "stable-import-id",
-      "childId": "known child id or explicit name from context",
-      "dayOfWeek": 1,
-      "startTime": "08:00",
-      "endTime": "08:40",
-      "period": 1,
-      "subject": "國語",
-      "teacher": null,
-      "location": null,
-      "note": null,
-      "validFrom": "YYYY-MM-DD"
-    }
-  ],
-  "warnings": ["任何不確定或缺失資訊"]
-}
+Allowed actions only:
+1. schedule.import
+{"type":"schedule.import","requiresConfirmation":true,"payload":{"items":[{"id":"stable-id","childId":"child-id","dayOfWeek":1,"subject":"國文","validFrom":"YYYY-MM-DD","validUntil":null,"startTime":null,"endTime":null,"period":1,"teacher":null,"location":null,"note":null}],"warnings":[]}}
+2. schedule.query
+{"type":"schedule.query","requiresConfirmation":false,"payload":{"date":"YYYY-MM-DD","childId":null}}
+3. shopping.add
+{"type":"shopping.add","requiresConfirmation":false,"payload":{"items":[{"id":"stable-id","name":"牛奶","quantity":1,"unit":"瓶","done":false,"note":null}]}}
+4. shopping.list
+{"type":"shopping.list","requiresConfirmation":false,"payload":{"includeDone":false}}
+5. shopping.setDone
+{"type":"shopping.setDone","requiresConfirmation":false,"payload":{"id":"item-id","done":true}}
+6. todo.add
+{"type":"todo.add","requiresConfirmation":false,"payload":{"items":[{"id":"stable-id","title":"繳學費","done":false,"dueDate":"YYYY-MM-DD","note":null}]}}
+7. todo.list
+{"type":"todo.list","requiresConfirmation":false,"payload":{"includeDone":false}}
+8. todo.setDone
+{"type":"todo.setDone","requiresConfirmation":false,"payload":{"id":"todo-id","done":true}}
 
 Rules:
-- dayOfWeek is 1=Monday ... 7=Sunday.
-- Do not guess missing times, child identity, teacher, location, or semester date.
-- If validFrom or childId cannot be supported by input/context, put a warning and do not fabricate it.
-- OCR imports always require user confirmation.
+- Resolve relative dates such as today/tomorrow into exact YYYY-MM-DD using Current local date.
+- For schedule queries, do not answer courses yourself. Emit schedule.query so the app reads the repository.
+- For shopping/todo lists, emit list actions; do not invent list content.
+- schedule.import ALWAYS requires confirmation.
+- Never invent OCR fields. Unknown optional fields must be null or omitted; add uncertainty to warnings.
+- IDs for new items must be short unique ASCII identifiers. Never reuse an ID from another item in the same response.
+- If the request is outside supported actions, return {"type":"unsupported","requiresConfirmation":false,"payload":{"reason":"..."}}.
 
 $groundedInput
 ''';
@@ -103,4 +93,7 @@ OCR_BLOCKS_WITH_BOUNDS:
 $blocks
 ''';
   }
+
+  String _date(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 }
