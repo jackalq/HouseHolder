@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/llm_e2e_smoke.yml'
       - 'scripts/llm_e2e_emulator.sh'
+      - 'android/app/build.gradle.kts'
       - 'android/app/src/debug/**'
       - 'android/app/src/main/kotlin/com/householder/app/RecommendedModelPackDownloader.kt'
       - 'android/app/src/main/kotlin/com/householder/app/LocalLlamaEngine.kt'
