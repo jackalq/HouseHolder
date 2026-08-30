@@ -3,6 +3,9 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val householderKeystorePath = System.getenv("HOUSEHOLDER_KEYSTORE_PATH")
+val householderKeystorePassword = System.getenv("HOUSEHOLDER_KEYSTORE_PASSWORD")
+
 android {
     namespace = "com.householder.app"
     compileSdk = flutter.compileSdkVersion
@@ -21,9 +24,26 @@ android {
         versionName = flutter.versionName
     }
 
+    val stableSigning = if (
+        !householderKeystorePath.isNullOrBlank() &&
+        !householderKeystorePassword.isNullOrBlank()
+    ) {
+        signingConfigs.create("householderStable") {
+            storeFile = file(householderKeystorePath)
+            storePassword = householderKeystorePassword
+            keyAlias = "householder"
+            keyPassword = householderKeystorePassword
+        }
+    } else {
+        null
+    }
+
     buildTypes {
+        getByName("debug") {
+            stableSigning?.let { signingConfig = it }
+        }
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = stableSigning ?: signingConfigs.getByName("debug")
         }
     }
 }
