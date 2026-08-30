@@ -6,6 +6,9 @@ import 'assistant/family_action_executor.dart';
 import 'features/schedule/schedule_repository.dart';
 import 'features/shopping/shopping_repository.dart';
 import 'features/todo/todo_repository.dart';
+import 'shopping/http_offer_provider.dart';
+import 'shopping/merchant_offer_provider.dart';
+import 'shopping/shopping_comparison_service.dart';
 import 'storage/device_identity.dart';
 import 'storage/entity_event_writer.dart';
 import 'storage/json_repository.dart';
@@ -24,6 +27,7 @@ class AppServices {
     required this.syncTransport,
     required this.sync,
     required this.conflicts,
+    required this.shoppingComparison,
   });
 
   final JsonDocumentRepository documents;
@@ -35,17 +39,27 @@ class AppServices {
   final AndroidSafSyncTransport syncTransport;
   final HouseholdSyncService sync;
   final SyncConflictInbox conflicts;
+  final ShoppingComparisonService shoppingComparison;
 
   static Future<AppServices> bootstrap() async {
     final appDocuments = await getApplicationDocumentsDirectory();
-    final documents = JsonDocumentRepository(Directory('${appDocuments.path}/HouseHolder'));
+    final documents = JsonDocumentRepository(
+      Directory('${appDocuments.path}/HouseHolder'),
+    );
     final deviceIdentity = DeviceIdentity(documents);
     await deviceIdentity.getOrCreate();
-    final writer = EntityEventWriter(documents: documents, deviceIdentity: deviceIdentity);
+    final writer = EntityEventWriter(
+      documents: documents,
+      deviceIdentity: deviceIdentity,
+    );
     final schedules = ScheduleRepository(documents: documents, writer: writer);
     final shopping = ShoppingRepository(documents: documents, writer: writer);
     final todos = TodoRepository(documents: documents, writer: writer);
-    final actions = FamilyActionExecutor(schedules: schedules, shopping: shopping, todos: todos);
+    final actions = FamilyActionExecutor(
+      schedules: schedules,
+      shopping: shopping,
+      todos: todos,
+    );
     final syncTransport = AndroidSafSyncTransport();
     final sync = HouseholdSyncService(
       documents: documents,
@@ -53,6 +67,18 @@ class AppServices {
       transport: syncTransport,
     );
     final conflicts = SyncConflictInbox(documents: documents, writer: writer);
+
+    const endpointText = String.fromEnvironment('HOUSEHOLDER_OFFER_ENDPOINT');
+    final providers = <MerchantOfferProvider>[];
+    if (endpointText.trim().isNotEmpty) {
+      final endpoint = Uri.tryParse(endpointText);
+      if (endpoint == null || !endpoint.hasScheme || endpoint.host.isEmpty) {
+        throw const FormatException('HOUSEHOLDER_OFFER_ENDPOINT is not a valid URI.');
+      }
+      providers.add(HttpMerchantOfferProvider(endpoint: endpoint));
+    }
+    final shoppingComparison = ShoppingComparisonService(providers: providers);
+
     return AppServices._(
       documents: documents,
       deviceIdentity: deviceIdentity,
@@ -63,6 +89,7 @@ class AppServices {
       syncTransport: syncTransport,
       sync: sync,
       conflicts: conflicts,
+      shoppingComparison: shoppingComparison,
     );
   }
 }
