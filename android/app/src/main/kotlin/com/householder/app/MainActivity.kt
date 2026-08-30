@@ -23,15 +23,18 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val OCR_CHANNEL = "householder/ocr"
         private const val SPEECH_CHANNEL = "householder/speech"
+        private const val LLM_CHANNEL = "family_butler/llm"
         private const val AUDIO_PERMISSION_REQUEST = 7101
     }
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var pendingSpeechResult: MethodChannel.Result? = null
     private var pendingOnDeviceOnly = false
+    private lateinit var llamaEngine: LocalLlamaEngine
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        llamaEngine = LocalLlamaEngine(this)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OCR_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -59,6 +62,31 @@ class MainActivity : FlutterActivity() {
                     "recognizeOnce" -> {
                         val onDeviceOnly = call.argument<Boolean>("onDeviceOnly") ?: false
                         beginSpeechRecognition(onDeviceOnly, result)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LLM_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isModelReady" -> result.success(llamaEngine.status().ready)
+                    "modelStatus" -> result.success(llamaEngine.status().toMap())
+                    "stop" -> {
+                        llamaEngine.stop()
+                        result.success(null)
+                    }
+                    "generate" -> {
+                        val prompt = call.argument<String>("prompt").orEmpty()
+                        val maxTokens = call.argument<Number>("maxTokens")?.toInt() ?: 256
+                        val temperature = call.argument<Number>("temperature")?.toFloat() ?: 0.2f
+                        llamaEngine.generate(
+                            prompt = prompt,
+                            maxTokens = maxTokens,
+                            temperature = temperature,
+                            onSuccess = result::success,
+                            onError = { code, message -> result.error(code, message, null) },
+                        )
                     }
                     else -> result.notImplemented()
                 }
@@ -217,6 +245,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         cleanupSpeech()
+        if (::llamaEngine.isInitialized) llamaEngine.close()
         super.onDestroy()
     }
 }
