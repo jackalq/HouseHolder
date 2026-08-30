@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "householder://formats/todo-item/v1",
+  "title": "HouseHolder Todo Item",
+  "type": "object",
+  "required": ["id", "title", "done"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "done": {"type": "boolean"},
+    "dueDate": {"type": ["string", "null"], "format": "date"},
+    "note": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
