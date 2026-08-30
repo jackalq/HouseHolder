@@ -3,6 +3,20 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../platform/ocr_gateway.dart';
 
+class TimetableImportResult {
+  const TimetableImportResult({
+    required this.document,
+    required this.childId,
+    required this.validFrom,
+    this.validUntil,
+  });
+
+  final OcrDocument document;
+  final String childId;
+  final String validFrom;
+  final String? validUntil;
+}
+
 class TimetableImportPage extends StatefulWidget {
   const TimetableImportPage({super.key});
 
@@ -14,6 +28,9 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
   final _picker = ImagePicker();
   final _ocr = OcrGateway();
   final _textController = TextEditingController();
+  final _childController = TextEditingController();
+  final _validFromController = TextEditingController();
+  final _validUntilController = TextEditingController();
 
   XFile? _image;
   OcrDocument? _document;
@@ -23,6 +40,9 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
   @override
   void dispose() {
     _textController.dispose();
+    _childController.dispose();
+    _validFromController.dispose();
+    _validUntilController.dispose();
     super.dispose();
   }
 
@@ -59,10 +79,28 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
 
   void _continueToParse() {
     final text = _textController.text.trim();
+    final childId = _childController.text.trim();
+    final validFrom = _validFromController.text.trim();
+    final validUntilText = _validUntilController.text.trim();
+
     if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('請先取得或輸入課表文字。')),
-      );
+      _showError('請先取得或輸入課表文字。');
+      return;
+    }
+    if (childId.isEmpty) {
+      _showError('請填寫這張課表屬於哪位孩子。');
+      return;
+    }
+    if (!_isIsoDate(validFrom)) {
+      _showError('請填寫有效起日，格式為 YYYY-MM-DD。');
+      return;
+    }
+    if (validUntilText.isNotEmpty && !_isIsoDate(validUntilText)) {
+      _showError('有效迄日格式必須是 YYYY-MM-DD。');
+      return;
+    }
+    if (validUntilText.isNotEmpty && validUntilText.compareTo(validFrom) < 0) {
+      _showError('有效迄日不能早於有效起日。');
       return;
     }
 
@@ -70,8 +108,23 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
       fullText: text,
       blocks: _document?.blocks ?? const [],
     );
-    Navigator.of(context).pop(reviewed);
+    Navigator.of(context).pop(
+      TimetableImportResult(
+        document: reviewed,
+        childId: childId,
+        validFrom: validFrom,
+        validUntil: validUntilText.isEmpty ? null : validUntilText,
+      ),
+    );
   }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  bool _isIsoDate(String value) =>
+      RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value) &&
+      DateTime.tryParse(value) != null;
 
   @override
   Widget build(BuildContext context) {
@@ -86,7 +139,44 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            const Text('OCR 會在 Android 裝置上執行。辨識後請先檢查文字，再交給管家解析。'),
+            const Text('OCR 會在 Android 裝置上執行。孩子與學期日期由你提供，模型不會猜測。'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _childController,
+              decoration: const InputDecoration(
+                labelText: '孩子 ID / 名稱 *',
+                hintText: '例如：小明',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _validFromController,
+                    keyboardType: TextInputType.datetime,
+                    decoration: const InputDecoration(
+                      labelText: '有效起日 *',
+                      hintText: '2026-09-01',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _validUntilController,
+                    keyboardType: TextInputType.datetime,
+                    decoration: const InputDecoration(
+                      labelText: '有效迄日',
+                      hintText: '2027-01-20',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 16),
             Row(
               children: [
