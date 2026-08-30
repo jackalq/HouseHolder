@@ -143,10 +143,9 @@ class LocalLlamaEngine(context: Context) {
         module?.let { return it }
 
         val created = LlmModule(modelPath, tokenizerPath, temperature)
-        val status = created.load()
-        if (status != 0) {
-            throw IllegalStateException("ExecuTorch model load failed with status $status")
-        }
+        // ExecuTorch Android 1.3.x exposes load() as Unit and reports failures
+        // by throwing. Treat successful return as a loaded module.
+        created.load()
         module = created
         return created
     }
