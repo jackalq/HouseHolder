@@ -66,7 +66,11 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
       return;
     }
 
-    Navigator.of(context).pop(text);
+    final reviewed = OcrDocument(
+      fullText: text,
+      blocks: _document?.blocks ?? const [],
+    );
+    Navigator.of(context).pop(reviewed);
   }
 
   @override
