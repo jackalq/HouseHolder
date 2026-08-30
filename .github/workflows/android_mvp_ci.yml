@@ -10,6 +10,9 @@ jobs:
   test-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HOUSEHOLDER_ANDROID_KEYSTORE_BASE64: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_BASE64 }}
+      HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -39,8 +42,29 @@ jobs:
       - name: Test
         run: flutter test
 
+      - name: Prepare stable Android signing
+        id: signing
+        shell: bash
+        run: |
+          if [[ -n "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" && -n "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD" ]]; then
+            printf '%s' "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/householder-release.p12"
+            echo "HOUSEHOLDER_KEYSTORE_PATH=$RUNNER_TEMP/householder-release.p12" >> "$GITHUB_ENV"
+            echo "HOUSEHOLDER_KEYSTORE_PASSWORD=$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Stable signing secrets are not configured. The debug artifact from this run cannot be used as a long-term in-place update package."
+          fi
+
       - name: Build Android debug APK
-        run: flutter build apk --debug
+        run: flutter build apk --debug --build-number=${{ github.run_number }}
+
+      - name: Verify stable APK signature
+        if: steps.signing.outputs.configured == 'true'
+        shell: bash
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-debug.apk | tee signing-certificate.txt
 
       - name: Upload Android debug APK
         uses: actions/upload-artifact@v4
@@ -49,6 +73,17 @@ jobs:
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload updatable Android APK
+        if: steps.signing.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: householder-updatable-apk
+          path: |
+            build/app/outputs/flutter-apk/app-debug.apk
+            signing-certificate.txt
+          if-no-files-found: error
+          retention-days: 30
 
   emulator-smoke:
     needs: test-and-build
