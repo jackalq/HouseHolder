@@ -47,7 +47,29 @@ TAP_X=$(cut -d' ' -f1 "$ARTIFACT_DIR/input-tap.txt")
 TAP_Y=$(cut -d' ' -f2 "$ARTIFACT_DIR/input-tap.txt")
 adb shell input tap "$TAP_X" "$TAP_Y"
 adb shell input text 'What%sis%smy%sschedule%stomorrow?'
-adb shell input keyevent 66
+
+adb shell uiautomator dump /sdcard/typed.xml >/dev/null
+adb pull /sdcard/typed.xml "$ARTIFACT_DIR/typed.xml" >/dev/null
+python3 - "$ARTIFACT_DIR/typed.xml" > "$ARTIFACT_DIR/send-tap.txt" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+for node in root.iter('node'):
+    if node.attrib.get('content-desc') == '送出':
+        m = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds', ''))
+        if not m:
+            raise SystemExit('send button bounds missing')
+        x1, y1, x2, y2 = map(int, m.groups())
+        print((x1 + x2) // 2, (y1 + y2) // 2)
+        break
+else:
+    raise SystemExit('household chat send button not found')
+PY
+
+SEND_X=$(cut -d' ' -f1 "$ARTIFACT_DIR/send-tap.txt")
+SEND_Y=$(cut -d' ' -f2 "$ARTIFACT_DIR/send-tap.txt")
+adb shell input tap "$SEND_X" "$SEND_Y"
 
 success=0
 attempt=1
