@@ -318,17 +318,35 @@ class MainActivity : FlutterActivity() {
         val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
         recognizer.process(image)
             .addOnSuccessListener { text ->
-                val blocks = text.textBlocks.map { block ->
-                    val box = block.boundingBox
-                    mapOf(
-                        "text" to block.text,
-                        "left" to box?.left?.toDouble(),
-                        "top" to box?.top?.toDouble(),
-                        "right" to box?.right?.toDouble(),
-                        "bottom" to box?.bottom?.toDouble()
-                    )
+                fun geometryToken(value: String, box: android.graphics.Rect?) = mapOf(
+                    "text" to value,
+                    "left" to box?.left?.toDouble(),
+                    "top" to box?.top?.toDouble(),
+                    "right" to box?.right?.toDouble(),
+                    "bottom" to box?.bottom?.toDouble(),
+                )
+
+                val elements = text.textBlocks.flatMap { block ->
+                    block.lines.flatMap { line ->
+                        line.elements.map { element ->
+                            geometryToken(element.text, element.boundingBox)
+                        }
+                    }
                 }
-                result.success(mapOf("fullText" to text.text, "blocks" to blocks))
+                val lines = text.textBlocks.flatMap { block ->
+                    block.lines.map { line -> geometryToken(line.text, line.boundingBox) }
+                }
+                val blocks = text.textBlocks.map { block ->
+                    geometryToken(block.text, block.boundingBox)
+                }
+                result.success(
+                    mapOf(
+                        "fullText" to text.text,
+                        "elements" to elements,
+                        "lines" to lines,
+                        "blocks" to blocks,
+                    )
+                )
             }
             .addOnFailureListener { error -> result.error("OCR_FAILED", error.message, null) }
             .addOnCompleteListener { recognizer.close() }
