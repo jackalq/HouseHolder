@@ -52,7 +52,10 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
 
   void _refreshModels() {
     if (!mounted) return;
-    setState(() => _modelsFuture = _llama.availableModels());
+    final modelsFuture = _llama.availableModels();
+    setState(() {
+      _modelsFuture = modelsFuture;
+    });
     widget.onInstalled();
   }
 
