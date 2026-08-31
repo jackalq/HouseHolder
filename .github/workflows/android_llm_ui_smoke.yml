@@ -36,6 +36,11 @@ jobs:
         run: flutter analyze
 
       - name: Build current debug APK
+        env:
+          # GitHub's x86_64 Android VM misreports support for optimized ggml CPU
+          # variants. Force the smoke APK to retain only llama.cpp's generic x64
+          # backend; production arm64 packaging is unaffected.
+          HOUSEHOLDER_CI_GENERIC_X86: '1'
         run: flutter build apk --debug --build-number=${{ github.run_number }}
 
       - name: Download Qwen2.5 0.5B GGUF smoke model
