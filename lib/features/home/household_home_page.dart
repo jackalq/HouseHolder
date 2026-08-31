@@ -245,6 +245,7 @@ class _HouseholdHomePageState extends State<HouseholdHomePage> {
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
                     key: const ValueKey('household-chat-send'),
+                    tooltip: '送出',
                     onPressed: _thinking ? null : _sendText,
                     icon: const Icon(Icons.send),
                   ),
