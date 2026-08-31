@@ -23,9 +23,9 @@ class OcrDocument {
 
   final String fullText;
 
-  /// Fine-grained OCR elements when available. Older Android builds may return
-  /// text blocks instead; callers should therefore treat these as generic
-  /// geometry-bearing OCR tokens rather than paragraphs.
+  /// Geometry-bearing OCR tokens. Android returns both ML Kit elements and
+  /// lines: elements preserve cell position while lines preserve Chinese words
+  /// that ML Kit may otherwise split into individual characters.
   final List<OcrBlock> blocks;
 }
 
@@ -42,14 +42,14 @@ class OcrGateway {
       throw StateError('OCR returned no result.');
     }
 
-    final elements = result['elements'] as List<Object?>?;
-    final lines = result['lines'] as List<Object?>?;
-    final blocks = result['blocks'] as List<Object?>?;
-    final rawBlocks = elements != null && elements.isNotEmpty
-        ? elements
-        : lines != null && lines.isNotEmpty
-            ? lines
-            : blocks ?? const <Object?>[];
+    final elements = result['elements'] as List<Object?>? ?? const <Object?>[];
+    final lines = result['lines'] as List<Object?>? ?? const <Object?>[];
+    final blocks = result['blocks'] as List<Object?>? ?? const <Object?>[];
+    final rawBlocks = <Object?>[
+      ...elements,
+      ...lines,
+      if (elements.isEmpty && lines.isEmpty) ...blocks,
+    ];
     return OcrDocument(
       fullText: result['fullText'] as String? ?? '',
       blocks: rawBlocks
