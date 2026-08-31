@@ -22,6 +22,10 @@ adb shell am force-stop "$PACKAGE"
 adb shell am start -W -n "$ACTIVITY" | tee "$ARTIFACT_DIR/am-start.txt"
 sleep 5
 
+# UIAutomator is used while the app is idle to discover the real Flutter
+# controls. Do not call it during native llama.cpp inference: Android test
+# automation may try to suspend the CPU-bound native worker and abort the app
+# if that suspension times out.
 adb shell uiautomator dump /sdcard/window.xml >/dev/null
 adb pull /sdcard/window.xml "$ARTIFACT_DIR/window.xml" >/dev/null
 
@@ -71,36 +75,63 @@ SEND_X=$(cut -d' ' -f1 "$ARTIFACT_DIR/send-tap.txt")
 SEND_Y=$(cut -d' ' -f2 "$ARTIFACT_DIR/send-tap.txt")
 adb shell input tap "$SEND_X" "$SEND_Y"
 
-success=0
+# Wait using logcat only. The debug marker is emitted after the real local LLM
+# result has been parsed, executed against the household repository, and added
+# to the Flutter conversation state. This avoids touching accessibility while
+# llama.cpp owns the CPU.
+completed=0
 attempt=1
-while [ "$attempt" -le 150 ]; do
+while [ "$attempt" -le 180 ]; do
   sleep 2
-  adb shell uiautomator dump /sdcard/result.xml >/dev/null || true
-  adb pull /sdcard/result.xml "$ARTIFACT_DIR/result.xml" >/dev/null || true
-  if grep -q '這次沒有處理成功' "$ARTIFACT_DIR/result.xml" 2>/dev/null || \
-     grep -q '處理失敗' "$ARTIFACT_DIR/result.xml" 2>/dev/null; then
+
+  if ! adb shell pidof "$PACKAGE" >/dev/null 2>&1; then
+    echo 'HouseHolder process died during local LLM inference.'
+    break
+  fi
+
+  adb logcat -d -v brief > "$ARTIFACT_DIR/live-logcat.txt"
+  if grep -q 'HOUSEHOLDER_CHAT_ERROR:' "$ARTIFACT_DIR/live-logcat.txt"; then
     echo 'Household conversation reported failure.'
     break
   fi
-  if grep -q '查不到符合的課程' "$ARTIFACT_DIR/result.xml" 2>/dev/null || \
-     grep -q '的課程：' "$ARTIFACT_DIR/result.xml" 2>/dev/null; then
-    success=1
+  if grep -q 'HOUSEHOLDER_CHAT_ASSISTANT:' "$ARTIFACT_DIR/live-logcat.txt"; then
+    completed=1
     break
   fi
   attempt=$((attempt + 1))
 done
 
+# Only after the conversation completed do we inspect the Flutter hierarchy.
+# This is the actual UI assertion required by the smoke test.
+if [ "$completed" -eq 1 ]; then
+  sleep 2
+  adb shell uiautomator dump /sdcard/result.xml >/dev/null
+  adb pull /sdcard/result.xml "$ARTIFACT_DIR/result.xml" >/dev/null
+fi
+
 adb logcat -d -v threadtime > "$ARTIFACT_DIR/logcat.txt"
 adb exec-out screencap -p > "$ARTIFACT_DIR/result.png"
-adb shell dumpsys meminfo "$PACKAGE" > "$ARTIFACT_DIR/meminfo.txt"
-adb shell "run-as $PACKAGE ls -lh $MODEL_DIR" > "$ARTIFACT_DIR/model-files.txt"
+adb shell dumpsys meminfo "$PACKAGE" > "$ARTIFACT_DIR/meminfo.txt" 2>/dev/null || true
+adb shell "run-as $PACKAGE ls -lh $MODEL_DIR" > "$ARTIFACT_DIR/model-files.txt" 2>/dev/null || true
+
+if [ "$completed" -ne 1 ]; then
+  echo 'Local household conversation did not complete.'
+  exit 1
+fi
+
+success=0
+if grep -q '查不到符合的課程' "$ARTIFACT_DIR/result.xml" 2>/dev/null || \
+   grep -q '的課程：' "$ARTIFACT_DIR/result.xml" 2>/dev/null; then
+  success=1
+fi
 
 if [ "$success" -ne 1 ]; then
   echo 'No grounded schedule answer appeared in the household chat UI.'
   exit 1
 fi
 
-if grep -Eq 'FATAL EXCEPTION|Process: com\.householder\.app.*FATAL' "$ARTIFACT_DIR/logcat.txt"; then
+if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|SIGABRT|SIGSEGV|Process: com\.householder\.app.*FATAL' "$ARTIFACT_DIR/logcat.txt"; then
+  echo 'Native or Java crash detected during household LLM smoke.'
   exit 1
 fi
 
