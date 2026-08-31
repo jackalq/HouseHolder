@@ -5,6 +5,10 @@ class LocalModelStatus {
     required this.ready,
     required this.modelPath,
     required this.modelBytes,
+    required this.modelId,
+    required this.modelName,
+    required this.runtime,
+    required this.selected,
     this.tokenizerPath,
   });
 
@@ -12,6 +16,10 @@ class LocalModelStatus {
   final String modelPath;
   final String? tokenizerPath;
   final int modelBytes;
+  final String modelId;
+  final String modelName;
+  final String runtime;
+  final bool selected;
 
   factory LocalModelStatus.fromMap(Map<Object?, Object?> map) {
     return LocalModelStatus(
@@ -19,6 +27,10 @@ class LocalModelStatus {
       modelPath: map['modelPath'] as String? ?? '',
       tokenizerPath: map['tokenizerPath'] as String?,
       modelBytes: (map['modelBytes'] as num?)?.toInt() ?? 0,
+      modelId: map['modelId'] as String? ?? '',
+      modelName: map['modelName'] as String? ?? 'Local model',
+      runtime: map['runtime'] as String? ?? 'unknown',
+      selected: map['selected'] as bool? ?? false,
     );
   }
 }
@@ -89,6 +101,8 @@ class RecommendedModelDownloadStatus {
 }
 
 class LocalLlamaGateway {
+  static const llamaModelId = 'llama3.2-3b-instruct-spinquant-int4-eo8';
+  static const qwenModelId = 'qwen2.5-1.5b-instruct-q4_k_m';
   static const _channel = MethodChannel('family_butler/llm');
 
   Future<String> generate(
@@ -109,7 +123,24 @@ class LocalLlamaGateway {
 
   Future<LocalModelStatus> modelStatus() async {
     final result = await _channel.invokeMapMethod<Object?, Object?>('modelStatus');
-    if (result == null) throw StateError('Android Llama runtime returned no model status.');
+    if (result == null) throw StateError('Android LLM runtime returned no model status.');
+    return LocalModelStatus.fromMap(result);
+  }
+
+  Future<List<LocalModelStatus>> availableModels() async {
+    final result = await _channel.invokeListMethod<Object?>('availableModels');
+    if (result == null) return const [];
+    return result
+        .whereType<Map<Object?, Object?>>()
+        .map(LocalModelStatus.fromMap)
+        .toList(growable: false);
+  }
+
+  Future<LocalModelStatus> selectModel(String modelId) async {
+    final result = await _channel.invokeMapMethod<Object?, Object?>('selectModel', {
+      'modelId': modelId,
+    });
+    if (result == null) throw StateError('Android LLM runtime returned no selected model.');
     return LocalModelStatus.fromMap(result);
   }
 
@@ -141,7 +172,7 @@ class LocalLlamaGateway {
   Future<LocalModelStatus> deleteModelPack() async {
     final result = await _channel.invokeMapMethod<Object?, Object?>('deleteModelPack');
     if (result == null) {
-      throw StateError('Android Llama runtime returned no model status after deletion.');
+      throw StateError('Android LLM runtime returned no model status after deletion.');
     }
     return LocalModelStatus.fromMap(result);
   }
