@@ -62,7 +62,7 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -memory 4096
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             mkdir -p llm-ui-smoke-artifacts
 
             adb install -r build/app/outputs/flutter-apk/app-debug.apk | tee llm-ui-smoke-artifacts/adb-install.txt
@@ -94,7 +94,7 @@ jobs:
             done
             find_button
 
-            python3 - <<'PY'
+            python3 - <<'PY' > llm-ui-smoke-artifacts/tap.txt
             import re
             import xml.etree.ElementTree as ET
             root = ET.parse('llm-ui-smoke-artifacts/window.xml').getroot()
@@ -104,23 +104,13 @@ jobs:
                     if not m:
                         raise SystemExit('button bounds missing')
                     x1, y1, x2, y2 = map(int, m.groups())
-                    print(f'{(x1+x2)//2} {(y1+y2)//2}')
+                    print((x1+x2)//2, (y1+y2)//2)
                     break
             else:
                 raise SystemExit('test inference button not found')
             PY
-            read TAP_X TAP_Y < <(python3 - <<'PY'
-            import re
-            import xml.etree.ElementTree as ET
-            root = ET.parse('llm-ui-smoke-artifacts/window.xml').getroot()
-            for node in root.iter('node'):
-                if node.attrib.get('text') == '測試推理':
-                    m = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib['bounds'])
-                    x1, y1, x2, y2 = map(int, m.groups())
-                    print((x1+x2)//2, (y1+y2)//2)
-                    break
-            PY
-            )
+            TAP_X=$(cut -d' ' -f1 llm-ui-smoke-artifacts/tap.txt)
+            TAP_Y=$(cut -d' ' -f2 llm-ui-smoke-artifacts/tap.txt)
             adb shell input tap "$TAP_X" "$TAP_Y"
 
             success=0
