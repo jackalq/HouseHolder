@@ -25,7 +25,7 @@ sleep 5
 find_button() {
   adb shell uiautomator dump /sdcard/window.xml >/dev/null
   adb pull /sdcard/window.xml "$ARTIFACT_DIR/window.xml" >/dev/null
-  grep -q 'text="測試推理"' "$ARTIFACT_DIR/window.xml"
+  grep -q 'content-desc="測試推理"' "$ARTIFACT_DIR/window.xml"
 }
 
 attempt=1
@@ -45,7 +45,7 @@ import sys
 import xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 for node in root.iter('node'):
-    if node.attrib.get('text') == '測試推理':
+    if node.attrib.get('content-desc') == '測試推理':
         m = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds', ''))
         if not m:
             raise SystemExit('button bounds missing')
