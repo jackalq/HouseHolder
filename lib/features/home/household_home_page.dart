@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app_services.dart';
@@ -65,6 +66,9 @@ class _HouseholdHomePageState extends State<HouseholdHomePage> {
       final result = await service.sendInput(input, displayText);
       if (!mounted) return;
       setState(() => _messages.add(result.assistantMessage));
+      if (kDebugMode) {
+        debugPrint('HOUSEHOLDER_CHAT_ASSISTANT:${result.assistantMessage.text}');
+      }
       if (result.scheduleDraft != null) {
         await _confirmSchedule(result.scheduleDraft!);
       }
@@ -77,6 +81,9 @@ class _HouseholdHomePageState extends State<HouseholdHomePage> {
           text: '這次沒有處理成功：$error',
         ));
       });
+      if (kDebugMode) {
+        debugPrint('HOUSEHOLDER_CHAT_ERROR:$error');
+      }
     } finally {
       if (mounted) setState(() => _thinking = false);
     }
