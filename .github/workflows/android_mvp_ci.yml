@@ -44,11 +44,12 @@ jobs:
         shell: bash
         env:
           HOUSEHOLDER_ANDROID_KEYSTORE_BASE64: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_BASE64 }}
-          HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
+          HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          if [[ -n "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" && -n "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD" ]]; then
+          if [[ -n "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" && -n "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW" ]]; then
             printf '%s' "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/householder-release.p12"
-            keytool -list -keystore "$RUNNER_TEMP/householder-release.p12" -storepass "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD" -alias householder >/dev/null
+            PASSWORD=$(printf '%s' "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW" | tr -d '\r\n' | sed -E 's/^[[:space:]]*Value:[[:space:]]*//; s/[[:space:]]+$//')
+            keytool -list -keystore "$RUNNER_TEMP/householder-release.p12" -storepass "$PASSWORD" -alias householder >/dev/null
             echo "HOUSEHOLDER_KEYSTORE_PATH=$RUNNER_TEMP/householder-release.p12" >> "$GITHUB_ENV"
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
@@ -57,9 +58,12 @@ jobs:
           fi
 
       - name: Build Android debug APK
+        shell: bash
         env:
-          HOUSEHOLDER_KEYSTORE_PASSWORD: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
-        run: flutter build apk --debug --build-number=${{ github.run_number }}
+          HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          PASSWORD=$(printf '%s' "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW" | tr -d '\r\n' | sed -E 's/^[[:space:]]*Value:[[:space:]]*//; s/[[:space:]]+$//')
+          HOUSEHOLDER_KEYSTORE_PASSWORD="$PASSWORD" flutter build apk --debug --build-number=${{ github.run_number }}
 
       - name: Verify stable APK signature
         if: steps.signing.outputs.configured == 'true'
