@@ -35,6 +35,10 @@ class TimetableGridResult {
 /// It never attempts to reconstruct a table from flattened OCR text. Instead it
 /// locates weekday headers and period-number anchors, derives cell boundaries,
 /// then assigns OCR elements to the matching cell by their bounding-box center.
+///
+/// Newer Android builds return fine-grained ML Kit elements. For compatibility
+/// with older builds that return a whole text block, [_explodeCoarseBlocks]
+/// creates approximate line/word boxes before applying the same geometry logic.
 class TimetableGridParser {
   const TimetableGridParser();
 
@@ -61,6 +65,7 @@ class TimetableGridParser {
   static const _aliases = <String, String>{
     '本士語': '本土語',
     '本十語': '本土語',
+    '本上語': '本土語',
     '国语': '國語',
     '数学': '數學',
     '体育': '體育',
@@ -72,7 +77,8 @@ class TimetableGridParser {
   };
 
   TimetableGridResult parse(OcrDocument document) {
-    final blocks = document.blocks.where(_hasBounds).toList(growable: false);
+    final bounded = document.blocks.where(_hasBounds).toList(growable: false);
+    final blocks = _explodeCoarseBlocks(bounded);
     final warnings = <String>[];
 
     final weekdayAnchors = <int, OcrBlock>{};
@@ -137,8 +143,66 @@ class TimetableGridParser {
 
     if (weekdayAnchors.length < 5) warnings.add('只定位到 ${weekdayAnchors.length}/5 個星期欄位');
     if (periodAnchors.length < 7) warnings.add('只定位到 ${periodAnchors.length}/7 個節次列');
+    if (bounded.any((b) => b.text.contains('\n'))) {
+      warnings.add('OCR 回傳較粗文字區塊，已用區塊內行列位置近似還原；建議逐格確認');
+    }
     if (cells.isEmpty) warnings.add('表格已定位，但沒有可靠的課程名稱');
     return TimetableGridResult(cells: cells, warnings: warnings);
+  }
+
+  /// Converts paragraph-like ML Kit blocks into approximate geometry tokens.
+  /// This fallback is intentionally conservative: fine-grained element boxes
+  /// pass through unchanged, while multiline/space-separated blocks are split
+  /// proportionally inside their original bounding box.
+  List<OcrBlock> _explodeCoarseBlocks(List<OcrBlock> source) {
+    final result = <OcrBlock>[];
+    for (final block in source) {
+      final lines = block.text
+          .split(RegExp(r'\r?\n'))
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .toList(growable: false);
+      if (lines.length <= 1) {
+        result.addAll(_splitHorizontal(block, block.text.trim()));
+        continue;
+      }
+
+      final height = block.bottom! - block.top!;
+      final lineHeight = height / lines.length;
+      for (var i = 0; i < lines.length; i++) {
+        final line = OcrBlock(
+          text: lines[i],
+          left: block.left,
+          right: block.right,
+          top: block.top! + lineHeight * i,
+          bottom: block.top! + lineHeight * (i + 1),
+        );
+        result.addAll(_splitHorizontal(line, lines[i]));
+      }
+    }
+    return result;
+  }
+
+  List<OcrBlock> _splitHorizontal(OcrBlock block, String text) {
+    final pieces = text
+        .split(RegExp(r'\s+'))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList(growable: false);
+    if (pieces.length <= 1) return [block];
+
+    final width = block.right! - block.left!;
+    final pieceWidth = width / pieces.length;
+    return [
+      for (var i = 0; i < pieces.length; i++)
+        OcrBlock(
+          text: pieces[i],
+          left: block.left! + pieceWidth * i,
+          right: block.left! + pieceWidth * (i + 1),
+          top: block.top,
+          bottom: block.bottom,
+        ),
+    ];
   }
 
   (double, double) _axisRange(List<double> centers, int index) {
