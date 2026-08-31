@@ -87,6 +87,19 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "isModelReady" -> result.success(llamaEngine.status().ready)
                     "modelStatus" -> result.success(llamaEngine.status().toMap())
+                    "availableModels" -> result.success(llamaEngine.models().map { it.toMap() })
+                    "selectModel" -> {
+                        val modelId = call.argument<String>("modelId").orEmpty()
+                        try {
+                            result.success(llamaEngine.selectModel(modelId).toMap())
+                        } catch (error: Throwable) {
+                            result.error(
+                                "MODEL_SELECTION_FAILED",
+                                error.message ?: error.javaClass.simpleName,
+                                modelId,
+                            )
+                        }
+                    }
                     "recommendedModelInfo" -> result.success(recommendedDownloader.info())
                     "recommendedDownloadStatus" -> result.success(recommendedDownloader.status())
                     "downloadRecommendedModelPack" -> downloadRecommendedModelPack(result)
