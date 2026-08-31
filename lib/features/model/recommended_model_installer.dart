@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../assistant/local_llama_gateway.dart';
+import 'resumable_http_downloader.dart';
 
 class RecommendedModelInstaller extends StatefulWidget {
   const RecommendedModelInstaller({
@@ -18,7 +19,8 @@ class RecommendedModelInstaller extends StatefulWidget {
   final VoidCallback onInstalled;
 
   @override
-  State<RecommendedModelInstaller> createState() => _RecommendedModelInstallerState();
+  State<RecommendedModelInstaller> createState() =>
+      _RecommendedModelInstallerState();
 }
 
 class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
@@ -61,7 +63,7 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
     try {
       info = await _llama.recommendedModelInfo();
     } catch (error) {
-      if (mounted) setState(() => _error = '無法取得推薦模型資訊：$error');
+      if (mounted) setState(() => _error = '無法取得推薦模型資訊：${_safeError(error)}');
       return;
     }
 
@@ -81,9 +83,9 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
               Text('建議裝置記憶體：${_gb(info.recommendedRamBytes)} GB 以上'),
               Text('來源：${info.source}'),
               const SizedBox(height: 12),
-              const Text('會直接下載 .pte 與 tokenizer 到 App 私有空間，完成後自動檢查 SHA-256。建議使用 Wi-Fi，下載期間請保持 App 開啟。'),
+              const Text('會直接下載 .pte 與 tokenizer 到 App 私有空間，完成後自動檢查 SHA-256。建議使用 Wi-Fi。'),
               const SizedBox(height: 10),
-              const Text('此模型使用 Llama 3.2 Community License。HouseHolder 不把模型權重包進 APK，而是從模型提供者來源下載。'),
+              const Text('此模型使用 Llama 3.2 Community License。'),
             ],
           ),
         ),
@@ -107,7 +109,6 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
         ],
       ),
     );
-
     if (confirmed != true || !mounted) return;
 
     setState(() {
@@ -120,41 +121,38 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
         totalBytes: 1,
       );
     });
-
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
 
-    LocalModelStatus status;
     try {
       await _llama.downloadRecommendedModelPack();
-      status = await _llama.selectModel(LocalLlamaGateway.llamaModelId);
+      final status = await _llama.selectModel(LocalLlamaGateway.llamaModelId);
+      if (!mounted) return;
+      _pollTimer?.cancel();
+      setState(() {
+        _busy = false;
+        _downloadStatus = null;
+        _error = null;
+      });
+      _refreshModels();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            status.ready
+                ? 'Llama 模型已下載、驗證並設為目前模型。'
+                : '下載完成，但模型狀態仍未就緒。',
+          ),
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       _pollTimer?.cancel();
       setState(() {
         _busy = false;
-        _error = '推薦模型下載失敗：$error';
+        _error = '推薦模型下載失敗：${_safeError(error)}';
       });
-      return;
     }
-
-    if (!mounted) return;
-    _pollTimer?.cancel();
-    setState(() {
-      _busy = false;
-      _downloadStatus = null;
-      _error = null;
-    });
-    _refreshModels();
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          status.ready ? 'Llama 模型已下載、驗證並設為目前模型。' : '下載完成，但模型狀態仍未就緒。',
-        ),
-      ),
-    );
   }
 
   Future<void> _startQwen() async {
@@ -174,12 +172,12 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
               ),
               SizedBox(height: 8),
               Text('模型格式：GGUF / Q4_K_M，約 1.12 GB'),
-              Text('Tokenizer：Qwen 官方 Qwen2.5-1.5B-Instruct tokenizer.json'),
+              Text('Tokenizer：Qwen 官方 tokenizer.json'),
               Text('授權：Apache-2.0'),
               SizedBox(height: 12),
-              Text('GGUF 本身已包含 llama.cpp 所需 tokenizer metadata；另外保存官方 tokenizer.json，供工具與未來 runtime 共用。'),
+              Text('下載會保留 .part 檔；網路或 CDN 中斷時會自動用 HTTP Range 續傳，不必重新下載整個模型。'),
               SizedBox(height: 10),
-              Text('安裝完成後會自動切換到 llama.cpp runtime，可直接在下方按「測試推理」驗證本機推論。'),
+              Text('完成後驗證 SHA-256，成功才會切換到 llama.cpp runtime。'),
             ],
           ),
         ),
@@ -197,6 +195,7 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
             child: const Text('取消'),
           ),
           FilledButton(
+            key: const ValueKey('qwen-download-confirm-button'),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('下載並安裝'),
           ),
@@ -238,8 +237,8 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
       if (!mounted) return;
       setState(() {
         _qwenBusy = false;
-        _qwenError = 'Qwen 模型下載或啟用失敗：$error';
-        _qwenStage = '安裝失敗';
+        _qwenError = 'Qwen 模型下載或啟用失敗：${_safeError(error)}';
+        _qwenStage = '安裝失敗，可再次按下載續傳';
       });
     }
   }
@@ -256,7 +255,7 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
         SnackBar(content: Text('目前模型：${selected.modelName}（${selected.runtime}）')),
       );
     } catch (error) {
-      if (mounted) setState(() => _error = '切換模型失敗：$error');
+      if (mounted) setState(() => _error = '切換模型失敗：${_safeError(error)}');
     }
   }
 
@@ -276,10 +275,11 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
       );
       if (output.trim().isEmpty) throw StateError('模型回傳空白內容');
       if (!mounted) return;
-      setState(() => _testResult = '推理完成｜${status.modelName}｜${status.runtime}\n$output');
+      setState(() =>
+          _testResult = '推理完成｜${status.modelName}｜${status.runtime}\n$output');
     } catch (error) {
       if (!mounted) return;
-      setState(() => _testResult = '推理失敗：$error');
+      setState(() => _testResult = '推理失敗：${_safeError(error)}');
     } finally {
       if (mounted) setState(() => _testBusy = false);
     }
@@ -291,16 +291,22 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
       final status = await _llama.recommendedDownloadStatus();
       if (!mounted) return;
       setState(() => _downloadStatus = status);
-    } catch (_) {
-      // The primary download call owns the final error; polling is best-effort.
-    }
+    } catch (_) {}
   }
 
   Future<void> _openExternal(String url) async {
-    if (url.isEmpty) return;
     final uri = Uri.tryParse(url);
     if (uri == null) return;
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  String _safeError(Object error) {
+    if (error is HttpException) return error.message;
+    if (error is SocketException) return '網路連線中斷，請再次嘗試，會從已下載進度續傳。';
+    if (error is TimeoutException) return '下載逾時，請再次嘗試，會從已下載進度續傳。';
+    final text = error.toString();
+    final uriAt = text.indexOf(', uri =');
+    return uriAt >= 0 ? text.substring(0, uriAt) : text;
   }
 
   String _stageLabel(String stage) {
@@ -326,7 +332,8 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
     }
   }
 
-  String _gb(int bytes) => (bytes / (1024 * 1024 * 1024)).toStringAsFixed(2);
+  String _gb(int bytes) =>
+      (bytes / (1024 * 1024 * 1024)).toStringAsFixed(2);
 
   @override
   Widget build(BuildContext context) {
@@ -341,7 +348,9 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
         ),
         if (status != null && _busy) ...[
           const SizedBox(height: 8),
-          LinearProgressIndicator(value: status.totalBytes > 1 ? status.progress : null),
+          LinearProgressIndicator(
+            value: status.totalBytes > 1 ? status.progress : null,
+          ),
           const SizedBox(height: 4),
           Text(
             '${_stageLabel(status.stage)}  '
@@ -355,9 +364,12 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
         ],
         const SizedBox(height: 12),
         OutlinedButton.icon(
+          key: const ValueKey('qwen-download-button'),
           onPressed: (_busy || _qwenBusy || _testBusy) ? null : _startQwen,
           icon: const Icon(Icons.download_for_offline_outlined),
-          label: Text(_qwenBusy ? '下載 Qwen2.5 1.5B 中…' : '一鍵下載 Qwen2.5 1.5B Q4_K_M'),
+          label: Text(
+            _qwenBusy ? '下載 Qwen2.5 1.5B 中…' : '一鍵下載 Qwen2.5 1.5B Q4_K_M',
+          ),
         ),
         if (_qwenBusy || _qwenProgress != null) ...[
           const SizedBox(height: 8),
@@ -439,8 +451,11 @@ class _QwenModelPackDownloader {
   static const _modelFile = 'qwen2.5-1.5b-instruct-q4_k_m.gguf';
   static const _tokenizerFile = 'tokenizer.json';
 
+  final ResumableHttpDownloader _downloader = ResumableHttpDownloader();
+
   Future<File> downloadAndInstall({
-    required void Function(String stage, int downloadedBytes, int totalBytes) onProgress,
+    required void Function(String stage, int downloadedBytes, int totalBytes)
+        onProgress,
   }) async {
     final support = await getApplicationSupportDirectory();
     final directory = Directory(
@@ -451,7 +466,7 @@ class _QwenModelPackDownloader {
     final model = File('${directory.path}/$_modelFile');
     final tokenizer = File('${directory.path}/$_tokenizerFile');
 
-    await _download(
+    await _downloader.download(
       Uri.parse(_modelUrl),
       model,
       stage: '下載 GGUF 模型…',
@@ -464,7 +479,7 @@ class _QwenModelPackDownloader {
       throw StateError('GGUF SHA-256 驗證失敗');
     }
 
-    await _download(
+    await _downloader.download(
       Uri.parse(_tokenizerUrl),
       tokenizer,
       stage: '下載官方 tokenizer.json…',
@@ -489,7 +504,8 @@ class _QwenModelPackDownloader {
         'modelSha256': _modelSha256,
         'tokenizerFile': _tokenizerFile,
         'tokenizerSource': tokenizerSourceUrl,
-        'tokenizerNote': 'GGUF embeds llama.cpp tokenizer metadata; tokenizer.json is retained as the official sidecar.',
+        'tokenizerNote':
+            'GGUF embeds llama.cpp tokenizer metadata; tokenizer.json is retained as the official sidecar.',
         'source': sourceUrl,
         'license': 'Apache-2.0',
       }),
@@ -497,60 +513,6 @@ class _QwenModelPackDownloader {
     );
     onProgress('模型包已安裝', 1, 1);
     return model;
-  }
-
-  Future<void> _download(
-    Uri uri,
-    File target, {
-    required String stage,
-    required void Function(String stage, int downloadedBytes, int totalBytes) onProgress,
-  }) async {
-    final part = File('${target.path}.part');
-    var existing = await part.exists() ? await part.length() : 0;
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 30);
-    try {
-      var request = await client.getUrl(uri);
-      request.headers.set(HttpHeaders.userAgentHeader, 'HouseHolder-Android/0.1');
-      request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-      if (existing > 0) request.headers.set(HttpHeaders.rangeHeader, 'bytes=$existing-');
-      var response = await request.close();
-
-      if (existing > 0 && response.statusCode == HttpStatus.ok) {
-        await response.drain<void>();
-        await part.delete();
-        existing = 0;
-        request = await client.getUrl(uri);
-        request.headers.set(HttpHeaders.userAgentHeader, 'HouseHolder-Android/0.1');
-        request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-        response = await request.close();
-      }
-
-      if (response.statusCode != HttpStatus.ok &&
-          response.statusCode != HttpStatus.partialContent) {
-        await response.drain<void>();
-        throw HttpException('HTTP ${response.statusCode}', uri: uri);
-      }
-
-      final total = response.contentLength > 0 ? existing + response.contentLength : 0;
-      var downloaded = existing;
-      onProgress(stage, downloaded, total);
-      final sink = part.openWrite(mode: existing > 0 ? FileMode.append : FileMode.write);
-      try {
-        await for (final chunk in response) {
-          sink.add(chunk);
-          downloaded += chunk.length;
-          onProgress(stage, downloaded, total);
-        }
-      } finally {
-        await sink.flush();
-        await sink.close();
-      }
-
-      if (await target.exists()) await target.delete();
-      await part.rename(target.path);
-    } finally {
-      client.close(force: true);
-    }
   }
 
   Future<String> _sha256(File file) async {
