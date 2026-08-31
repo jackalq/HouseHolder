@@ -32,61 +32,37 @@ class AssistantOrchestrator {
   final LocalLlamaGateway _llama;
 
   Future<FamilyActionDraft> propose(AssistantInput input) async {
-    final groundedInput = switch (input) {
-      TextAssistantInput(:final text) => 'USER_TEXT:\n$text',
-      SpeechAssistantInput(:final transcript) => 'SPEECH_TRANSCRIPT:\n$transcript',
-      ImageAssistantInput(:final ocr, :final context) => _imagePrompt(ocr, context),
-    };
-
     final now = DateTime.now();
     final today = _date(now);
-    final prompt = '''
-You are HouseHolder's local planning model. You NEVER answer household facts from memory.
-Return exactly one JSON object and no prose or markdown.
-Current local date: $today
-Current local weekday: ${now.weekday} (Monday=1, Sunday=7)
 
-Allowed actions only:
-1. schedule.import
-{"type":"schedule.import","requiresConfirmation":true,"payload":{"items":[{"id":"stable-id","childId":"child-id","dayOfWeek":1,"subject":"國文","validFrom":"YYYY-MM-DD","validUntil":null,"startTime":null,"endTime":null,"period":1,"teacher":null,"location":null,"note":null}],"warnings":[]}}
-2. schedule.query
-{"type":"schedule.query","requiresConfirmation":false,"payload":{"date":"YYYY-MM-DD","childId":null}}
-3. shopping.add
-{"type":"shopping.add","requiresConfirmation":false,"payload":{"items":[{"id":"stable-id","name":"牛奶","quantity":1,"unit":"瓶","done":false,"note":null}]}}
-4. shopping.list
-{"type":"shopping.list","requiresConfirmation":false,"payload":{"includeDone":false}}
-5. shopping.setDone
-{"type":"shopping.setDone","requiresConfirmation":false,"payload":{"name":"牛奶","done":true}}
-6. todo.add
-{"type":"todo.add","requiresConfirmation":false,"payload":{"items":[{"id":"stable-id","title":"繳學費","done":false,"dueDate":"YYYY-MM-DD","note":null}]}}
-7. todo.list
-{"type":"todo.list","requiresConfirmation":false,"payload":{"includeDone":false}}
-8. todo.setDone
-{"type":"todo.setDone","requiresConfirmation":false,"payload":{"title":"繳學費","done":true}}
-
-Rules:
-- Resolve relative dates such as today/tomorrow into exact YYYY-MM-DD using Current local date.
-- For schedule queries, do not answer courses yourself. Emit schedule.query so the app reads the repository.
-- For shopping/todo lists, emit list actions; do not invent list content.
-- For shopping.setDone use the item name stated by the user. Never invent an internal item ID.
-- For todo.setDone use the todo title stated by the user. Never invent an internal todo ID.
-- The app resolves names/titles against persisted data and rejects missing or ambiguous matches.
-- schedule.import ALWAYS requires confirmation.
-- Never invent OCR fields. Unknown optional fields must be null or omitted; add uncertainty to warnings.
-- For timetable imports, HOUSEHOLDER_IMPORT_CONTEXT values are authoritative user-supplied fields and must be copied exactly into every imported item as childId/validFrom/validUntil.
-- IDs for NEW items must be short unique ASCII identifiers. Never reuse an ID from another item in the same response.
-- If the request is outside supported actions, return {"type":"unsupported","requiresConfirmation":false,"payload":{"reason":"..."}}.
-
-$groundedInput
-''';
-
-    // Text/speech actions are deliberately short structured JSON. Keeping their
-    // generation budget bounded improves on-device latency and prevents a small
-    // planning model from drifting into unnecessary continuation. OCR timetable
-    // imports need a larger budget because one image can contain many lessons.
-    final maxTokens = switch (input) {
-      ImageAssistantInput() => 768,
-      TextAssistantInput() || SpeechAssistantInput() => 128,
+    final (prompt, maxTokens) = switch (input) {
+      TextAssistantInput(:final text) => (
+          _householdActionPrompt(
+            inputLabel: 'USER_TEXT',
+            inputText: text,
+            today: today,
+            weekday: now.weekday,
+          ),
+          128,
+        ),
+      SpeechAssistantInput(:final transcript) => (
+          _householdActionPrompt(
+            inputLabel: 'SPEECH_TRANSCRIPT',
+            inputText: transcript,
+            today: today,
+            weekday: now.weekday,
+          ),
+          128,
+        ),
+      ImageAssistantInput(:final ocr, :final context) => (
+          _scheduleImportPrompt(
+            ocr: ocr,
+            context: context,
+            today: today,
+            weekday: now.weekday,
+          ),
+          768,
+        ),
     };
 
     return FamilyActionDraft(
@@ -98,13 +74,56 @@ $groundedInput
     );
   }
 
-  String _imagePrompt(OcrDocument ocr, String? context) {
+  String _householdActionPrompt({
+    required String inputLabel,
+    required String inputText,
+    required String today,
+    required int weekday,
+  }) =>
+      '''
+You are HouseHolder's local action planner. Output exactly ONE JSON object, no prose or markdown.
+Today=$today; weekday=$weekday (Mon=1..Sun=7).
+Never invent household facts. Queries must ask the app repository.
+
+Actions and exact JSON shapes:
+schedule.query: {"type":"schedule.query","requiresConfirmation":false,"payload":{"date":"YYYY-MM-DD","childId":null}}
+shopping.add: {"type":"shopping.add","requiresConfirmation":false,"payload":{"items":[{"id":"new-id","name":"item","quantity":1,"unit":null,"done":false,"note":null}]}}
+shopping.list: {"type":"shopping.list","requiresConfirmation":false,"payload":{"includeDone":false}}
+shopping.setDone: {"type":"shopping.setDone","requiresConfirmation":false,"payload":{"name":"item","done":true}}
+todo.add: {"type":"todo.add","requiresConfirmation":false,"payload":{"items":[{"id":"new-id","title":"task","done":false,"dueDate":null,"note":null}]}}
+todo.list: {"type":"todo.list","requiresConfirmation":false,"payload":{"includeDone":false}}
+todo.setDone: {"type":"todo.setDone","requiresConfirmation":false,"payload":{"title":"task","done":true}}
+unsupported: {"type":"unsupported","requiresConfirmation":false,"payload":{"reason":"reason"}}
+
+Resolve today/tomorrow/relative dates to YYYY-MM-DD. For schedule questions ALWAYS emit schedule.query; never answer courses yourself. Use user-stated item names/titles, never internal IDs. New IDs are short unique ASCII.
+
+$inputLabel:
+$inputText
+''';
+
+  String _scheduleImportPrompt({
+    required OcrDocument ocr,
+    required String? context,
+    required String today,
+    required int weekday,
+  }) {
     final blocks = ocr.blocks
         .map((block) => '${block.text} @ [${block.left},${block.top},${block.right},${block.bottom}]')
         .join('\n');
 
     return '''
-IMAGE_CONTEXT:
+You are HouseHolder's local timetable importer. Output exactly ONE JSON object, no prose or markdown.
+Today=$today; weekday=$weekday (Mon=1..Sun=7).
+Output only this action shape:
+{"type":"schedule.import","requiresConfirmation":true,"payload":{"items":[{"id":"new-id","childId":"child-id","dayOfWeek":1,"subject":"subject","validFrom":"YYYY-MM-DD","validUntil":null,"startTime":null,"endTime":null,"period":1,"teacher":null,"location":null,"note":null}],"warnings":[]}}
+
+Rules:
+- schedule.import ALWAYS requiresConfirmation=true.
+- Never invent OCR fields. Unknown optional fields are null/omitted and uncertainty goes in warnings.
+- HOUSEHOLDER_IMPORT_CONTEXT values are authoritative and must be copied exactly into every item's childId/validFrom/validUntil.
+- New IDs are short unique ASCII and must not repeat.
+
+HOUSEHOLDER_IMPORT_CONTEXT:
 ${context ?? '(none)'}
 OCR_FULL_TEXT:
 ${ocr.fullText}
