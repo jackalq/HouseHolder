@@ -80,7 +80,22 @@ Rules:
 $groundedInput
 ''';
 
-    return FamilyActionDraft(rawJson: await _llama.generate(prompt));
+    // Text/speech actions are deliberately short structured JSON. Keeping their
+    // generation budget bounded improves on-device latency and prevents a small
+    // planning model from drifting into unnecessary continuation. OCR timetable
+    // imports need a larger budget because one image can contain many lessons.
+    final maxTokens = switch (input) {
+      ImageAssistantInput() => 768,
+      TextAssistantInput() || SpeechAssistantInput() => 128,
+    };
+
+    return FamilyActionDraft(
+      rawJson: await _llama.generate(
+        prompt,
+        maxTokens: maxTokens,
+        temperature: 0,
+      ),
+    );
   }
 
   String _imagePrompt(OcrDocument ocr, String? context) {
