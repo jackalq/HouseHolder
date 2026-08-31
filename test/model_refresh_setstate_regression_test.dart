@@ -3,17 +3,20 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('model status refresh does not return a Future from setState callback', () {
-    final source = File('lib/main.dart').readAsStringSync();
+  test('model list refresh keeps setState callback synchronous', () {
+    final source = File(
+      'lib/features/model/recommended_model_installer.dart',
+    ).readAsStringSync();
 
     expect(
       source,
-      isNot(contains('setState(() => _modelStatusFuture = _llama.modelStatus())')),
-      reason: 'Flutter setState callbacks must not return the Future assigned by modelStatus().',
+      contains('setState(() => _modelsFuture = _llama.availableModels());'),
+      reason: 'The model refresh should replace the Future synchronously inside setState.',
     );
     expect(
       source,
-      contains('setState(() {\n      _modelStatusFuture = nextStatus;\n    });'),
+      isNot(contains('setState(() => _llama.availableModels())')),
+      reason: 'Flutter setState callbacks must not return the Future from availableModels().',
     );
   });
 }
