@@ -60,6 +60,72 @@ void main() {
     final result = const TimetableGridParser().parse(OcrDocument(fullText: '', blocks: blocks));
     expect(result.cells.single.subject, '本土語');
   });
+
+  test('recovers table geometry when OCR returns coarse multiline blocks', () {
+    const blocks = <OcrBlock>[
+      OcrBlock(
+        text: '星期一 星期二 星期三 星期四 星期五',
+        left: 150,
+        top: 100,
+        right: 650,
+        bottom: 140,
+      ),
+      OcrBlock(
+        text: '1\n2\n3\n4',
+        left: 40,
+        top: 190,
+        right: 100,
+        bottom: 590,
+      ),
+      OcrBlock(
+        text: '數學 數學 數學 彈性 數學',
+        left: 150,
+        top: 190,
+        right: 650,
+        bottom: 240,
+      ),
+      OcrBlock(
+        text: '國語 體育 國語 國語 體育',
+        left: 150,
+        top: 290,
+        right: 650,
+        bottom: 340,
+      ),
+      OcrBlock(
+        text: '健康 音樂 英語 美術 國語',
+        left: 150,
+        top: 390,
+        right: 650,
+        bottom: 440,
+      ),
+      OcrBlock(
+        text: '本士語 國語 生活 美術 生活',
+        left: 150,
+        top: 490,
+        right: 650,
+        bottom: 540,
+      ),
+      OcrBlock(
+        text: '張嘉峰 吳羽涵',
+        left: 250,
+        top: 545,
+        right: 550,
+        bottom: 580,
+      ),
+    ];
+
+    final result = const TimetableGridParser().parse(
+      const OcrDocument(fullText: 'coarse block OCR', blocks: blocks),
+    );
+
+    expect(result.cells.length, 20);
+    expect(
+      result.cells.any((c) => c.dayOfWeek == 1 && c.period == 4 && c.subject == '本土語'),
+      isTrue,
+    );
+    expect(result.cells.any((c) => c.subject == '張嘉峰'), isFalse);
+    expect(result.warnings.any((w) => w.contains('較粗文字區塊')), isTrue);
+  });
 }
 
 OcrBlock _block(String text, double centerX, double centerY) => OcrBlock(
