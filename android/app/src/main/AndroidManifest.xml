@@ -12,7 +12,8 @@
     <application
         android:label="HouseHolder"
         android:name="${applicationName}"
-        android:icon="@android:drawable/sym_def_app_icon">
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:extractNativeLibs="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

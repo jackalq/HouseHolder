@@ -18,7 +18,9 @@ android {
 
     defaultConfig {
         applicationId = "com.householder.app"
-        minSdk = flutter.minSdkVersion
+        // llama.android v0.0.4 requires API 30. This still covers modern Android
+        // devices while keeping the GGUF runtime in-process and fully offline.
+        minSdk = 30
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -46,6 +48,16 @@ android {
             signingConfig = stableSigning ?: signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        jniLibs {
+            // llama.android packages native llama.cpp libraries in the AAR.
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
 }
 
 kotlin {
@@ -62,6 +74,11 @@ dependencies {
     // Bundled OCR model: works without waiting for a Play Services download.
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 
-    // Pin to ExecuTorch 1.3.x while validating the Android LLM Java API.
+    // Llama 3.2 .pte runtime.
     implementation("org.pytorch:executorch-android:1.3.1")
+
+    // GGUF/Qwen runtime. Pin the wrapper release so llama.cpp ABI/API changes do
+    // not silently change HouseHolder behavior.
+    implementation("com.github.1opp0-org:llama.android:v0.0.4")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }
