@@ -5,6 +5,7 @@ plugins {
 
 val householderKeystorePath = System.getenv("HOUSEHOLDER_KEYSTORE_PATH")
 val householderKeystorePassword = System.getenv("HOUSEHOLDER_KEYSTORE_PASSWORD")
+val householderCiGenericX86 = System.getenv("HOUSEHOLDER_CI_GENERIC_X86") == "1"
 
 android {
     namespace = "com.householder.app"
@@ -53,6 +54,23 @@ android {
         jniLibs {
             // llama.android packages native llama.cpp libraries in the AAR.
             useLegacyPackaging = true
+
+            // The hosted Android x86_64 emulator advertises CPU features that make
+            // llama.cpp's release AAR select an optimized x86 backend, while the
+            // virtual CPU cannot safely execute that backend. For the UI inference
+            // smoke only, keep the generic x64 backend and remove optimized x86
+            // variants. Production arm64 APKs are unchanged.
+            if (householderCiGenericX86) {
+                excludes += setOf(
+                    "**/libggml-cpu-sse42.so",
+                    "**/libggml-cpu-sandybridge.so",
+                    "**/libggml-cpu-ivybridge.so",
+                    "**/libggml-cpu-haswell.so",
+                    "**/libggml-cpu-skylakex.so",
+                    "**/libggml-cpu-icelake.so",
+                    "**/libggml-cpu-alderlake.so",
+                )
+            }
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
