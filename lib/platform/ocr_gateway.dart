@@ -22,6 +22,10 @@ class OcrDocument {
   const OcrDocument({required this.fullText, required this.blocks});
 
   final String fullText;
+
+  /// Fine-grained OCR elements when available. Older Android builds may return
+  /// text blocks instead; callers should therefore treat these as generic
+  /// geometry-bearing OCR tokens rather than paragraphs.
   final List<OcrBlock> blocks;
 }
 
@@ -38,7 +42,9 @@ class OcrGateway {
       throw StateError('OCR returned no result.');
     }
 
-    final rawBlocks = result['blocks'] as List<Object?>? ?? const [];
+    final rawBlocks = (result['elements'] as List<Object?>?) ??
+        (result['blocks'] as List<Object?>?) ??
+        const [];
     return OcrDocument(
       fullText: result['fullText'] as String? ?? '',
       blocks: rawBlocks
