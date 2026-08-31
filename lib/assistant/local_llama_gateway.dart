@@ -179,3 +179,7 @@ class LocalLlamaGateway {
 
   Future<void> stop() => _channel.invokeMethod<void>('stop');
 }
+
+extension HouseHolderIterableFirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
