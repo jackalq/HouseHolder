@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 /// Downloads large files reliably with HTTP Range resume and automatic retry.
 ///
@@ -39,8 +38,6 @@ class ResumableHttpDownloader {
       try {
         var response = await _open(client, source, existing);
 
-        // Some servers ignore Range and return 200. In that case restart only
-        // this file rather than appending a second full response.
         if (existing > 0 && response.statusCode == HttpStatus.ok) {
           await response.drain<void>();
           if (await part.exists()) await part.delete();
@@ -86,8 +83,6 @@ class ResumableHttpDownloader {
           await sink.close();
         }
 
-        // contentLength is the bytes expected in this response. A clean EOF
-        // before that amount means a CDN/proxy closed the transfer early.
         if (response.contentLength > 0 &&
             downloaded - existing != response.contentLength) {
           throw const HttpException('Connection ended before download completed');
@@ -104,10 +99,9 @@ class ResumableHttpDownloader {
       } catch (error) {
         lastError = error;
         if (attempt >= maxAttempts || !_isRetryable(error)) rethrow;
-        final delaySeconds = math.min(
-          30,
-          retryBaseDelay.inSeconds * (1 << math.min(attempt - 1, 4)),
-        );
+        final exponent = attempt - 1 > 4 ? 4 : attempt - 1;
+        final calculated = retryBaseDelay.inSeconds * (1 << exponent);
+        final delaySeconds = calculated > 30 ? 30 : calculated;
         await Future<void>.delayed(Duration(seconds: delaySeconds));
       } finally {
         client.close(force: true);
