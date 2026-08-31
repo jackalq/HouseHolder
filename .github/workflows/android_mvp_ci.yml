@@ -10,9 +10,6 @@ jobs:
   test-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      HOUSEHOLDER_ANDROID_KEYSTORE_BASE64: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_BASE64 }}
-      HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -45,11 +42,14 @@ jobs:
       - name: Prepare stable Android signing
         id: signing
         shell: bash
+        env:
+          HOUSEHOLDER_ANDROID_KEYSTORE_BASE64: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_BASE64 }}
+          HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
         run: |
           if [[ -n "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" && -n "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD" ]]; then
             printf '%s' "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/householder-release.p12"
+            keytool -list -keystore "$RUNNER_TEMP/householder-release.p12" -storepass "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD" -alias householder >/dev/null
             echo "HOUSEHOLDER_KEYSTORE_PATH=$RUNNER_TEMP/householder-release.p12" >> "$GITHUB_ENV"
-            echo "HOUSEHOLDER_KEYSTORE_PASSWORD=$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -57,6 +57,8 @@ jobs:
           fi
 
       - name: Build Android debug APK
+        env:
+          HOUSEHOLDER_KEYSTORE_PASSWORD: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
         run: flutter build apk --debug --build-number=${{ github.run_number }}
 
       - name: Verify stable APK signature
