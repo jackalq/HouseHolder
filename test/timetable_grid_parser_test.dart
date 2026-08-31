@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:householder/features/schedule/timetable_grid_parser.dart';
-import 'package:householder/platform/ocr_gateway.dart';
+import 'package:family_butler/features/schedule/timetable_grid_parser.dart';
+import 'package:family_butler/platform/ocr_gateway.dart';
 
 void main() {
   test('reconstructs the 23 course cells from weekday/period geometry', () {
