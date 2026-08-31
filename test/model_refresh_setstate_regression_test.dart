@@ -10,13 +10,18 @@ void main() {
 
     expect(
       source,
-      contains('setState(() => _modelsFuture = _llama.availableModels());'),
-      reason: 'The model refresh should replace the Future synchronously inside setState.',
+      contains('final modelsFuture = _llama.availableModels();'),
+      reason: 'Async work should be started before entering setState.',
     );
     expect(
       source,
-      isNot(contains('setState(() => _llama.availableModels())')),
-      reason: 'Flutter setState callbacks must not return the Future from availableModels().',
+      contains('_modelsFuture = modelsFuture;'),
+      reason: 'setState should synchronously assign the already-created Future.',
+    );
+    expect(
+      source,
+      isNot(contains('setState(() => _modelsFuture = _llama.availableModels());')),
+      reason: 'An expression-bodied setState callback would return the Future and crash at runtime.',
     );
   });
 }
