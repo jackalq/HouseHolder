@@ -5,9 +5,9 @@ import android.os.Handler
 import android.os.Looper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
@@ -65,7 +65,21 @@ class LocalLlamaEngine(context: Context) {
     private val appContext = context.applicationContext
     private val execExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val ggufScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // llama.cpp generation is a long blocking JNI call. Keep it off
+    // Dispatchers.Default: Android ART may try to suspend a busy coroutine pool
+    // worker for diagnostics/GC and abort the process when the native call does
+    // not reach a Java safepoint quickly enough (especially on x86 emulators).
+    // A dedicated worker also prevents local inference from starving unrelated
+    // coroutine work in the app.
+    private val ggufExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "householder-llama-worker").apply {
+            priority = Thread.NORM_PRIORITY - 1
+            isDaemon = false
+        }
+    }
+    private val ggufDispatcher = ggufExecutor.asCoroutineDispatcher()
+    private val ggufScope = CoroutineScope(SupervisorJob() + ggufDispatcher)
     private val ggufEngineDelegate = lazy { AiChat.getInferenceEngine(appContext) }
 
     @Volatile private var module: LlmModule? = null
@@ -327,6 +341,7 @@ class LocalLlamaEngine(context: Context) {
         stop()
         execExecutor.shutdownNow()
         ggufScope.cancel()
+        ggufDispatcher.close()
         if (ggufEngineDelegate.isInitialized()) {
             ggufEngineDelegate.value.destroy()
         }
