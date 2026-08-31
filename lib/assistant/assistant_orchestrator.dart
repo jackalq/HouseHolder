@@ -43,7 +43,7 @@ class AssistantOrchestrator {
             today: today,
             weekday: now.weekday,
           ),
-          128,
+          80,
         ),
       SpeechAssistantInput(:final transcript) => (
           _householdActionPrompt(
@@ -52,7 +52,7 @@ class AssistantOrchestrator {
             today: today,
             weekday: now.weekday,
           ),
-          128,
+          80,
         ),
       ImageAssistantInput(:final ocr, :final context) => (
           _scheduleImportPrompt(
@@ -66,11 +66,7 @@ class AssistantOrchestrator {
     };
 
     return FamilyActionDraft(
-      rawJson: await _llama.generate(
-        prompt,
-        maxTokens: maxTokens,
-        temperature: 0,
-      ),
+      rawJson: await _llama.generate(prompt, maxTokens: maxTokens, temperature: 0),
     );
   }
 
@@ -79,27 +75,50 @@ class AssistantOrchestrator {
     required String inputText,
     required String today,
     required int weekday,
-  }) =>
-      '''
-You are HouseHolder's local action planner. Output exactly ONE JSON object, no prose or markdown.
-Today=$today; weekday=$weekday (Mon=1..Sun=7).
-Never invent household facts. Queries must ask the app repository.
+  }) {
+    final lower = inputText.toLowerCase();
+    final scheduleIntent = _containsAny(lower, const [
+      '課表', '課程', '上課', 'schedule', 'class', 'lesson', 'tomorrow', 'today',
+    ]);
+    final shoppingIntent = _containsAny(lower, const [
+      '採購', '購物', '買', 'shopping', 'buy', 'purchase', 'milk',
+    ]);
+    final todoIntent = _containsAny(lower, const [
+      '待辦', '提醒', 'todo', 'task', 'remember',
+    ]);
 
-Actions and exact JSON shapes:
-schedule.query: {"type":"schedule.query","requiresConfirmation":false,"payload":{"date":"YYYY-MM-DD","childId":null}}
-shopping.add: {"type":"shopping.add","requiresConfirmation":false,"payload":{"items":[{"id":"new-id","name":"item","quantity":1,"unit":null,"done":false,"note":null}]}}
-shopping.list: {"type":"shopping.list","requiresConfirmation":false,"payload":{"includeDone":false}}
-shopping.setDone: {"type":"shopping.setDone","requiresConfirmation":false,"payload":{"name":"item","done":true}}
-todo.add: {"type":"todo.add","requiresConfirmation":false,"payload":{"items":[{"id":"new-id","title":"task","done":false,"dueDate":null,"note":null}]}}
-todo.list: {"type":"todo.list","requiresConfirmation":false,"payload":{"includeDone":false}}
-todo.setDone: {"type":"todo.setDone","requiresConfirmation":false,"payload":{"title":"task","done":true}}
-unsupported: {"type":"unsupported","requiresConfirmation":false,"payload":{"reason":"reason"}}
+    final actions = scheduleIntent && !shoppingIntent && !todoIntent
+        ? _scheduleActions
+        : shoppingIntent && !scheduleIntent && !todoIntent
+            ? _shoppingActions
+            : todoIntent && !scheduleIntent && !shoppingIntent
+                ? _todoActions
+                : '$_scheduleActions\n$_shoppingActions\n$_todoActions';
 
-Resolve today/tomorrow/relative dates to YYYY-MM-DD. For schedule questions ALWAYS emit schedule.query; never answer courses yourself. Use user-stated item names/titles, never internal IDs. New IDs are short unique ASCII.
-
-$inputLabel:
-$inputText
+    return '''
+HouseHolder action planner. Return ONE JSON object only.
+Today=$today weekday=$weekday (Mon=1..Sun=7). Do not invent stored facts.
+$actions
+unsupported={"type":"unsupported","requiresConfirmation":false,"payload":{"reason":"reason"}}
+Resolve relative dates. Repository questions emit query/list actions, never answer stored facts yourself. Keep user names/titles exactly.
+$inputLabel: $inputText
 ''';
+  }
+
+  static const _scheduleActions =
+      'schedule.query={"type":"schedule.query","requiresConfirmation":false,"payload":{"date":"YYYY-MM-DD","childId":null}}';
+
+  static const _shoppingActions = '''
+shopping.add={"type":"shopping.add","requiresConfirmation":false,"payload":{"items":[{"name":"item","quantity":1,"unit":"個","done":false}]}}
+shopping.list={"type":"shopping.list","requiresConfirmation":false,"payload":{"includeDone":false}}
+shopping.setDone={"type":"shopping.setDone","requiresConfirmation":false,"payload":{"name":"item","done":true}}''';
+
+  static const _todoActions = '''
+todo.add={"type":"todo.add","requiresConfirmation":false,"payload":{"items":[{"title":"task","done":false,"dueDate":null}]}}
+todo.list={"type":"todo.list","requiresConfirmation":false,"payload":{"includeDone":false}}
+todo.setDone={"type":"todo.setDone","requiresConfirmation":false,"payload":{"title":"task","done":true}}''';
+
+  bool _containsAny(String text, List<String> values) => values.any(text.contains);
 
   String _scheduleImportPrompt({
     required OcrDocument ocr,
@@ -116,13 +135,7 @@ You are HouseHolder's local timetable importer. Output exactly ONE JSON object, 
 Today=$today; weekday=$weekday (Mon=1..Sun=7).
 Output only this action shape:
 {"type":"schedule.import","requiresConfirmation":true,"payload":{"items":[{"id":"new-id","childId":"child-id","dayOfWeek":1,"subject":"subject","validFrom":"YYYY-MM-DD","validUntil":null,"startTime":null,"endTime":null,"period":1,"teacher":null,"location":null,"note":null}],"warnings":[]}}
-
-Rules:
-- schedule.import ALWAYS requiresConfirmation=true.
-- Never invent OCR fields. Unknown optional fields are null/omitted and uncertainty goes in warnings.
-- HOUSEHOLDER_IMPORT_CONTEXT values are authoritative and must be copied exactly into every item's childId/validFrom/validUntil.
-- New IDs are short unique ASCII and must not repeat.
-
+Rules: schedule.import requires confirmation; never invent OCR fields; unknown optional values are null; context childId/validFrom/validUntil is authoritative; IDs must be unique ASCII.
 HOUSEHOLDER_IMPORT_CONTEXT:
 ${context ?? '(none)'}
 OCR_FULL_TEXT:
