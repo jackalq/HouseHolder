@@ -26,12 +26,21 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
   final _qwen = _QwenModelPackDownloader();
   Timer? _pollTimer;
   RecommendedModelDownloadStatus? _downloadStatus;
+  late Future<List<LocalModelStatus>> _modelsFuture;
   bool _busy = false;
   bool _qwenBusy = false;
+  bool _testBusy = false;
   double? _qwenProgress;
   String _qwenStage = 'idle';
   String? _error;
   String? _qwenError;
+  String? _testResult;
+
+  @override
+  void initState() {
+    super.initState();
+    _modelsFuture = _llama.availableModels();
+  }
 
   @override
   void dispose() {
@@ -39,8 +48,14 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
     super.dispose();
   }
 
+  void _refreshModels() {
+    if (!mounted) return;
+    setState(() => _modelsFuture = _llama.availableModels());
+    widget.onInstalled();
+  }
+
   Future<void> _start() async {
-    if (_busy || _qwenBusy) return;
+    if (_busy || _qwenBusy || _testBusy) return;
 
     RecommendedModelInfo info;
     try {
@@ -111,7 +126,8 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
 
     LocalModelStatus status;
     try {
-      status = await _llama.downloadRecommendedModelPack();
+      await _llama.downloadRecommendedModelPack();
+      status = await _llama.selectModel(LocalLlamaGateway.llamaModelId);
     } catch (error) {
       if (!mounted) return;
       _pollTimer?.cancel();
@@ -129,27 +145,20 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
       _downloadStatus = null;
       _error = null;
     });
-
-    try {
-      widget.onInstalled();
-    } catch (error) {
-      if (mounted) {
-        setState(() => _error = '模型已安裝，但畫面狀態刷新失敗：$error');
-      }
-    }
+    _refreshModels();
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          status.ready ? '推薦模型已下載並完成驗證。' : '下載完成，但模型狀態仍未就緒。',
+          status.ready ? 'Llama 模型已下載、驗證並設為目前模型。' : '下載完成，但模型狀態仍未就緒。',
         ),
       ),
     );
   }
 
   Future<void> _startQwen() async {
-    if (_busy || _qwenBusy) return;
+    if (_busy || _qwenBusy || _testBusy) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -168,9 +177,9 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
               Text('Tokenizer：Qwen 官方 Qwen2.5-1.5B-Instruct tokenizer.json'),
               Text('授權：Apache-2.0'),
               SizedBox(height: 12),
-              Text('GGUF 本身已包含 llama.cpp 所需 tokenizer metadata；另外保存官方 tokenizer.json，供後續 runtime/工具共用。'),
+              Text('GGUF 本身已包含 llama.cpp 所需 tokenizer metadata；另外保存官方 tokenizer.json，供工具與未來 runtime 共用。'),
               SizedBox(height: 10),
-              Text('目前 Android 推論後端仍是 ExecuTorch .pte；此按鈕先完成 GGUF 模型包下載、模型 SHA-256 驗證與 tokenizer 配套，不會把 GGUF 誤標成 ExecuTorch 已可執行。'),
+              Text('安裝完成後會自動切換到 llama.cpp runtime，可直接在下方按「測試推理」驗證本機推論。'),
             ],
           ),
         ),
@@ -213,22 +222,66 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
           });
         },
       );
+      final selected = await _llama.selectModel(LocalLlamaGateway.qwenModelId);
       if (!mounted) return;
       setState(() {
         _qwenBusy = false;
         _qwenProgress = 1;
-        _qwenStage = '模型包已安裝';
+        _qwenStage = '模型已安裝並啟用';
       });
+      _refreshModels();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Qwen 模型包已完成驗證：${installed.path}')),
+        SnackBar(content: Text('Qwen 已啟用（${selected.runtime}）：${installed.path}')),
       );
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _qwenBusy = false;
-        _qwenError = 'Qwen 模型下載失敗：$error';
-        _qwenStage = '下載失敗';
+        _qwenError = 'Qwen 模型下載或啟用失敗：$error';
+        _qwenStage = '安裝失敗';
       });
+    }
+  }
+
+  Future<void> _selectModel(LocalModelStatus model) async {
+    if (!model.ready || _busy || _qwenBusy || _testBusy) return;
+    try {
+      final selected = await _llama.selectModel(model.modelId);
+      if (!mounted) return;
+      setState(() => _testResult = null);
+      _refreshModels();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('目前模型：${selected.modelName}（${selected.runtime}）')),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = '切換模型失敗：$error');
+    }
+  }
+
+  Future<void> _testInference() async {
+    if (_testBusy || _busy || _qwenBusy) return;
+    setState(() {
+      _testBusy = true;
+      _testResult = '本機模型推理中…';
+    });
+    try {
+      final status = await _llama.modelStatus();
+      if (!status.ready) throw StateError('尚未安裝可用模型');
+      final output = await _llama.generate(
+        '這是 HouseHolder 本機推理測試。請只用一句簡短中文回答：本機推理正常。',
+        maxTokens: 32,
+        temperature: 0,
+      );
+      if (output.trim().isEmpty) throw StateError('模型回傳空白內容');
+      if (!mounted) return;
+      setState(() => _testResult = '推理完成｜${status.modelName}｜${status.runtime}\n$output');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _testResult = '推理失敗：$error');
+    } finally {
+      if (mounted) setState(() => _testBusy = false);
     }
   }
 
@@ -282,7 +335,7 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         FilledButton.icon(
-          onPressed: (_busy || _qwenBusy) ? null : _start,
+          onPressed: (_busy || _qwenBusy || _testBusy) ? null : _start,
           icon: const Icon(Icons.download_for_offline_outlined),
           label: Text(_busy ? '下載推薦模型中…' : '一鍵下載 Llama 3.2 3B'),
         ),
@@ -302,7 +355,7 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
         ],
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: (_busy || _qwenBusy) ? null : _startQwen,
+          onPressed: (_busy || _qwenBusy || _testBusy) ? null : _startQwen,
           icon: const Icon(Icons.download_for_offline_outlined),
           label: Text(_qwenBusy ? '下載 Qwen2.5 1.5B 中…' : '一鍵下載 Qwen2.5 1.5B Q4_K_M'),
         ),
@@ -315,6 +368,53 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
         if (_qwenError != null) ...[
           const SizedBox(height: 6),
           Text(_qwenError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        ],
+        const SizedBox(height: 16),
+        const Divider(),
+        const SizedBox(height: 8),
+        const Text('本機模型', style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        FutureBuilder<List<LocalModelStatus>>(
+          future: _modelsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Text('正在檢查已安裝模型…');
+            }
+            if (snapshot.hasError) return Text('模型狀態讀取失敗：${snapshot.error}');
+            final models = snapshot.data ?? const <LocalModelStatus>[];
+            return Column(
+              children: models.map((model) {
+                final sizeMb = model.modelBytes / (1024 * 1024);
+                return RadioListTile<String>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: model.modelId,
+                  groupValue: models.where((m) => m.selected && m.ready).firstOrNull?.modelId,
+                  onChanged: model.ready ? (_) => _selectModel(model) : null,
+                  title: Text(model.modelName),
+                  subtitle: Text(
+                    model.ready
+                        ? '${model.runtime} · ${sizeMb.toStringAsFixed(0)} MB${model.selected ? ' · 使用中' : ''}'
+                        : '${model.runtime} · 尚未安裝',
+                  ),
+                );
+              }).toList(growable: false),
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        FilledButton.tonalIcon(
+          key: const ValueKey('local-llm-inference-smoke-button'),
+          onPressed: (_busy || _qwenBusy || _testBusy) ? null : _testInference,
+          icon: const Icon(Icons.smart_toy_outlined),
+          label: Text(_testBusy ? '本機推理中…' : '測試推理'),
+        ),
+        if (_testResult != null) ...[
+          const SizedBox(height: 8),
+          SelectableText(
+            _testResult!,
+            key: const ValueKey('local-llm-inference-smoke-result'),
+          ),
         ],
       ],
     );
@@ -427,9 +527,7 @@ class _QwenModelPackDownloader {
         throw HttpException('HTTP ${response.statusCode}', uri: uri);
       }
 
-      final total = response.contentLength > 0
-          ? existing + response.contentLength
-          : 0;
+      final total = response.contentLength > 0 ? existing + response.contentLength : 0;
       var downloaded = existing;
       onProgress(stage, downloaded, total);
       final sink = part.openWrite(mode: existing > 0 ? FileMode.append : FileMode.write);
