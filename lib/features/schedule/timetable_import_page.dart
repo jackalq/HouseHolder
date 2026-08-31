@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../platform/ocr_gateway.dart';
+import 'timetable_grid_parser.dart';
 
 class TimetableImportPage extends StatefulWidget {
   const TimetableImportPage({super.key});
@@ -13,6 +14,7 @@ class TimetableImportPage extends StatefulWidget {
 class _TimetableImportPageState extends State<TimetableImportPage> {
   final _picker = ImagePicker();
   final _ocr = OcrGateway();
+  final _gridParser = const TimetableGridParser();
   final _textController = TextEditingController();
   final _childController = TextEditingController();
   final _validFromController = TextEditingController();
@@ -20,6 +22,7 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
 
   XFile? _image;
   OcrDocument? _document;
+  TimetableGridResult? _grid;
   bool _busy = false;
   String? _error;
 
@@ -36,6 +39,7 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
     setState(() {
       _error = null;
       _document = null;
+      _grid = null;
     });
 
     final image = await _picker.pickImage(
@@ -52,9 +56,13 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
 
     try {
       final document = await _ocr.recognizeImage(image.path);
+      final grid = _gridParser.parse(document);
       if (!mounted) return;
       _textController.text = document.fullText;
-      setState(() => _document = document);
+      setState(() {
+        _document = document;
+        _grid = grid;
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = error.toString());
@@ -90,12 +98,16 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
       return;
     }
 
+    final gridText = _grid?.usable == true
+        ? _grid!.toPromptText()
+        : 'STRUCTURED_TIMETABLE_GRID:\n(unavailable; use OCR cautiously)';
     final reviewed = OcrDocument(
       fullText: '''
 HOUSEHOLDER_IMPORT_CONTEXT:
 childId=$childId
 validFrom=$validFrom
 validUntil=${validUntilText.isEmpty ? 'null' : validUntilText}
+$gridText
 OCR_TEXT:
 $text
 '''.trim(),
@@ -125,7 +137,7 @@ $text
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            const Text('OCR 會在 Android 裝置上執行。孩子與學期日期由你提供，模型不會猜測。'),
+            const Text('先用 OCR 座標還原星期 × 節次表格，再交給本機模型做文字修正；孩子與學期日期由你提供。'),
             const SizedBox(height: 16),
             TextField(
               controller: _childController,
@@ -187,7 +199,7 @@ $text
               const SizedBox(height: 18),
               const LinearProgressIndicator(),
               const SizedBox(height: 8),
-              const Text('正在辨識課表…'),
+              const Text('正在辨識並還原課表格線…'),
             ],
             if (_image != null) ...[
               const SizedBox(height: 18),
@@ -204,26 +216,58 @@ $text
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ],
+            if (_grid != null) ...[
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _grid!.usable
+                            ? '表格定位：已找到 ${_grid!.cells.length} 個課程格'
+                            : '表格定位不足，將保留 OCR 文字供人工修正',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      if (_grid!.warnings.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(_grid!.warnings.join('；')),
+                      ],
+                      if (_grid!.usable) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _grid!.cells
+                              .map((c) => '星期${c.dayOfWeek} 第${c.period}節 ${c.subject}')
+                              .join('\n'),
+                          key: const ValueKey('timetable-grid-preview'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             TextField(
               controller: _textController,
               minLines: 10,
               maxLines: 20,
               decoration: const InputDecoration(
-                labelText: 'OCR 結果（可修正）',
+                labelText: 'OCR 原文（必要時可修正）',
                 alignLabelWithHint: true,
                 border: OutlineInputBorder(),
               ),
             ),
             if (_document != null) ...[
               const SizedBox(height: 8),
-              Text('辨識到 ${_document!.blocks.length} 個文字區塊'),
+              Text('辨識到 ${_document!.blocks.length} 個帶座標文字區塊'),
             ],
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: _busy ? null : _continueToParse,
               icon: const Icon(Icons.arrow_forward),
-              label: const Text('確認文字並繼續解析'),
+              label: const Text('確認並產生課表草稿'),
             ),
           ],
         ),
