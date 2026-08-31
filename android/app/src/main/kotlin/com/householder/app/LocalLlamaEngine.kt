@@ -27,8 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - ExecuTorch handles the original Llama 3.2 .pte pack.
  * - llama.cpp (through llama.android) handles GGUF packs such as Qwen2.5.
  *
- * The public API intentionally stays unchanged so the Flutter MethodChannel
- * does not need to know which native runtime is active.
+ * The public API intentionally stays stable so Flutter only chooses a model id;
+ * native runtime routing remains an Android implementation detail.
  */
 class LocalLlamaEngine(context: Context) {
     companion object {
@@ -81,6 +81,7 @@ class LocalLlamaEngine(context: Context) {
         val modelId: String,
         val modelName: String,
         val runtime: String,
+        val selected: Boolean,
     ) {
         fun toMap(): Map<String, Any?> = mapOf(
             "ready" to ready,
@@ -90,17 +91,61 @@ class LocalLlamaEngine(context: Context) {
             "modelId" to modelId,
             "modelName" to modelName,
             "runtime" to runtime,
+            "selected" to selected,
         )
     }
 
-    fun status(): ModelStatus {
-        val llama = llamaStatus()
-        val qwen = qwenStatus()
-        return when (requestedModelId()) {
-            QWEN_MODEL_ID -> if (qwen.ready) qwen else llama
-            LLAMA_MODEL_ID -> if (llama.ready) llama else qwen
-            else -> if (qwen.ready) qwen else llama
+    fun models(): List<ModelStatus> {
+        val requested = requestedModelId()
+        val llama = llamaStatus(requested == LLAMA_MODEL_ID)
+        val qwen = qwenStatus(requested == QWEN_MODEL_ID)
+        if (requested == null) {
+            return if (qwen.ready) {
+                listOf(llama, qwen.copy(selected = true))
+            } else {
+                listOf(llama.copy(selected = llama.ready), qwen)
+            }
         }
+        return listOf(llama, qwen)
+    }
+
+    fun status(): ModelStatus {
+        val candidates = models()
+        return candidates.firstOrNull { it.selected && it.ready }
+            ?: candidates.firstOrNull { it.ready }
+            ?: candidates.first()
+    }
+
+    @Synchronized
+    fun selectModel(modelId: String): ModelStatus {
+        val target = when (modelId) {
+            LLAMA_MODEL_ID -> llamaStatus(selected = true)
+            QWEN_MODEL_ID -> qwenStatus(selected = true)
+            else -> throw IllegalArgumentException("Unknown local model id: $modelId")
+        }
+        require(target.ready) { "Selected local model is not installed: $modelId" }
+
+        stop()
+        module = null
+        if (ggufEngineDelegate.isInitialized()) {
+            try {
+                ggufEngineDelegate.value.cleanUp()
+            } catch (_: Throwable) {
+                // Best-effort unload before switching runtimes.
+            }
+        }
+        ggufLoadedPath = null
+
+        val directory = modelDirectory().apply { mkdirs() }
+        val selection = File(directory, ACTIVE_MODEL_FILE)
+        val temporary = File(directory, "$ACTIVE_MODEL_FILE.tmp")
+        temporary.writeText(modelId)
+        if (selection.exists()) selection.delete()
+        if (!temporary.renameTo(selection)) {
+            temporary.copyTo(selection, overwrite = true)
+            temporary.delete()
+        }
+        return target
     }
 
     fun generate(
@@ -303,7 +348,7 @@ class LocalLlamaEngine(context: Context) {
         .map { File(modelDirectory(), it) }
         .firstOrNull { it.isFile && it.length() > 0L }
 
-    private fun llamaStatus(): ModelStatus {
+    private fun llamaStatus(selected: Boolean = false): ModelStatus {
         val model = llamaModelFile()
         val tokenizer = llamaTokenizerFileOrNull()
         return ModelStatus(
@@ -314,10 +359,11 @@ class LocalLlamaEngine(context: Context) {
             modelId = LLAMA_MODEL_ID,
             modelName = LLAMA_MODEL_NAME,
             runtime = "executorch",
+            selected = selected,
         )
     }
 
-    private fun qwenStatus(): ModelStatus {
+    private fun qwenStatus(selected: Boolean = false): ModelStatus {
         val directory = File(modelDirectory(), QWEN_DIRECTORY)
         val model = File(directory, QWEN_MODEL_FILE)
         val tokenizer = File(directory, QWEN_TOKENIZER_FILE)
@@ -329,6 +375,7 @@ class LocalLlamaEngine(context: Context) {
             modelId = QWEN_MODEL_ID,
             modelName = QWEN_MODEL_NAME,
             runtime = "llama.cpp",
+            selected = selected,
         )
     }
 
