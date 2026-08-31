@@ -385,12 +385,16 @@ class _RecommendedModelInstallerState extends State<RecommendedModelInstaller> {
             return Column(
               children: models.map((model) {
                 final sizeMb = model.modelBytes / (1024 * 1024);
-                return RadioListTile<String>(
+                return ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  value: model.modelId,
-                  groupValue: models.where((m) => m.selected && m.ready).firstOrNull?.modelId,
-                  onChanged: model.ready ? (_) => _selectModel(model) : null,
+                  enabled: model.ready,
+                  onTap: model.ready ? () => _selectModel(model) : null,
+                  leading: Icon(
+                    model.selected && model.ready
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                  ),
                   title: Text(model.modelName),
                   subtitle: Text(
                     model.ready
