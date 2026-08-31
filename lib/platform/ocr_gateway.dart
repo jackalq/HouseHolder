@@ -42,9 +42,14 @@ class OcrGateway {
       throw StateError('OCR returned no result.');
     }
 
-    final rawBlocks = (result['elements'] as List<Object?>?) ??
-        (result['blocks'] as List<Object?>?) ??
-        const [];
+    final elements = result['elements'] as List<Object?>?;
+    final lines = result['lines'] as List<Object?>?;
+    final blocks = result['blocks'] as List<Object?>?;
+    final rawBlocks = elements != null && elements.isNotEmpty
+        ? elements
+        : lines != null && lines.isNotEmpty
+            ? lines
+            : blocks ?? const <Object?>[];
     return OcrDocument(
       fullText: result['fullText'] as String? ?? '',
       blocks: rawBlocks
