@@ -43,6 +43,7 @@ class RecommendedModelPackDownloader(context: Context) {
         private const val TOKENIZER_SHA256 =
             "82e9d31979e92ab929cd544440f129d9ecd797b69e327f80f17e1c50d5551b55"
         private const val REQUIRED_HEADROOM_BYTES = 512L * 1024L * 1024L
+        private const val IO_BUFFER_BYTES = 1024 * 1024
     }
 
     private val appContext = context.applicationContext
@@ -162,9 +163,9 @@ class RecommendedModelPackDownloader(context: Context) {
             }
 
             val append = existingBytes > 0L && response == HttpURLConnection.HTTP_PARTIAL
-            connection.inputStream.buffered(1024 * 1024).use { input ->
-                FileOutputStream(temporary, append).buffered(1024 * 1024).use { output ->
-                    val buffer = ByteArray(1024 * 1024)
+            connection.inputStream.buffered(IO_BUFFER_BYTES).use { input ->
+                FileOutputStream(temporary, append).buffered(IO_BUFFER_BYTES).use { output ->
+                    val buffer = ByteArray(IO_BUFFER_BYTES)
                     var totalForFile = if (append) existingBytes else 0L
                     while (true) {
                         val count = input.read(buffer)
@@ -216,8 +217,8 @@ class RecommendedModelPackDownloader(context: Context) {
 
     private fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).buffered(1024 * 1024).use { input ->
-            val buffer = ByteArray(1024 * 1024)
+        FileInputStream(file).buffered(IO_BUFFER_BYTES).use { input ->
+            val buffer = ByteArray(IO_BUFFER_BYTES)
             while (true) {
                 val count = input.read(buffer)
                 if (count < 0) break
@@ -227,13 +228,58 @@ class RecommendedModelPackDownloader(context: Context) {
         return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
     }
 
+    /**
+     * Finalizes a verified .part file without assuming File.renameTo() has
+     * perfectly reliable return semantics on every Android-backed filesystem.
+     *
+     * In CI we observed renameTo() return false after the destination had
+     * already materialized, and the old fallback then tried to copy a source
+     * path that no longer existed. Validate both paths after a failed rename
+     * before deciding whether a copy fallback is actually necessary.
+     */
     private fun replaceAtomically(source: File, target: File) {
+        if (!source.isFile) {
+            throw IllegalStateException("Verified source is missing: ${source.name}")
+        }
+        val expectedBytes = source.length()
+
         if (target.exists() && !target.delete()) {
             throw IllegalStateException("Unable to replace ${target.name}")
         }
-        if (!source.renameTo(target)) {
-            source.copyTo(target, overwrite = true)
-            if (!source.delete()) throw IllegalStateException("Unable to finalize ${target.name}")
+
+        if (source.renameTo(target)) {
+            if (!target.isFile || target.length() != expectedBytes) {
+                throw IllegalStateException("Installed file size mismatch for ${target.name}")
+            }
+            return
+        }
+
+        // A failed return value does not guarantee that the move did not happen.
+        if (!source.exists()) {
+            if (target.isFile && target.length() == expectedBytes) return
+            throw IllegalStateException(
+                "Verified source disappeared while installing ${target.name}"
+            )
+        }
+
+        FileInputStream(source).buffered(IO_BUFFER_BYTES).use { input ->
+            FileOutputStream(target, false).use { output ->
+                val buffer = ByteArray(IO_BUFFER_BYTES)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                }
+                output.fd.sync()
+            }
+        }
+
+        if (!target.isFile || target.length() != expectedBytes) {
+            target.delete()
+            throw IllegalStateException("Installed file size mismatch for ${target.name}")
+        }
+        if (!source.delete() && source.exists()) {
+            throw IllegalStateException("Unable to finalize ${target.name}")
         }
     }
 }
