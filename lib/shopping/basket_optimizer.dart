@@ -27,6 +27,9 @@ class BasketOptimizer {
           final bScore = item.preference.score(title: b.title, merchantId: b.merchantId, merchantName: b.merchantName);
           if (aScore != bScore) return bScore.compareTo(aScore);
           if (a.shippingKnown != b.shippingKnown) return a.shippingKnown ? -1 : 1;
+          final aSubtotal = ShoppingPlanLine(request: item, offer: a).subtotalTwd;
+          final bSubtotal = ShoppingPlanLine(request: item, offer: b).subtotalTwd;
+          if (aSubtotal != bSubtotal) return aSubtotal.compareTo(bSubtotal);
           return a.unitPriceTwd.compareTo(b.unitPriceTwd);
         });
       if (matches.isEmpty) throw StateError('No in-stock offer matching preferences for ${item.label}.');
@@ -93,7 +96,6 @@ class BasketOptimizer {
   }
 
   bool _isBetter(ShoppingPlan candidate, ShoppingPlan current, ShoppingStrategy strategy) {
-    // Preferences rank before price after all hard constraints have been applied.
     if (candidate.preferenceScore != current.preferenceScore) return candidate.preferenceScore > current.preferenceScore;
     if (strategy == ShoppingStrategy.fewestMerchants) {
       if (candidate.merchantCount != current.merchantCount) return candidate.merchantCount < current.merchantCount;
