@@ -1,3 +1,4 @@
+import '../../shopping/merchant_offer.dart';
 import '../../shopping/product_preference.dart';
 
 class HouseholdShoppingItem {
@@ -53,6 +54,13 @@ class HouseholdShoppingItem {
         if (note != null && note!.trim().isNotEmpty) 'note': note!.trim(),
         if (!preference.isEmpty) 'preference': preference.toJson(),
       };
+
+  ShoppingRequestItem toComparisonRequest() => ShoppingRequestItem(
+        itemKey: id,
+        label: '$name${note == null || note!.trim().isEmpty ? '' : ' ${note!.trim()}'}',
+        quantity: quantity,
+        preference: preference,
+      );
 
   HouseholdShoppingItem copyWith({bool? done, ProductPreference? preference}) => HouseholdShoppingItem(
         id: id,
