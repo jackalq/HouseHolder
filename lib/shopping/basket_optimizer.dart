@@ -20,19 +20,21 @@ class BasketOptimizer {
     final candidates = <List<MerchantOffer>>[];
     for (final item in items) {
       final matches = offers
-          .where((offer) => offer.itemKey == item.itemKey && offer.inStock)
+          .where((offer) => offer.itemKey == item.itemKey && offer.inStock && item.preference.accepts(offer.title))
           .toList()
         ..sort((a, b) {
+          final aScore = item.preference.score(title: a.title, merchantId: a.merchantId, merchantName: a.merchantName);
+          final bScore = item.preference.score(title: b.title, merchantId: b.merchantId, merchantName: b.merchantName);
+          if (aScore != bScore) return bScore.compareTo(aScore);
           if (a.shippingKnown != b.shippingKnown) return a.shippingKnown ? -1 : 1;
           return a.unitPriceTwd.compareTo(b.unitPriceTwd);
         });
-      if (matches.isEmpty) throw StateError('No in-stock offer for ${item.label}.');
+      if (matches.isEmpty) throw StateError('No in-stock offer matching preferences for ${item.label}.');
       candidates.add(matches.take(maxOffersPerItem).toList(growable: false));
     }
 
     ShoppingPlan? best;
     final chosen = <ShoppingPlanLine>[];
-
     void visit(int index) {
       if (index == items.length) {
         final plan = _buildPlan(chosen);
@@ -56,17 +58,11 @@ class BasketOptimizer {
     return best!;
   }
 
-  Map<ShoppingStrategy, ShoppingPlan?> compareStrategies({
-    required List<ShoppingRequestItem> items,
-    required List<MerchantOffer> offers,
-  }) {
+  Map<ShoppingStrategy, ShoppingPlan?> compareStrategies({required List<ShoppingRequestItem> items, required List<MerchantOffer> offers}) {
     final result = <ShoppingStrategy, ShoppingPlan?>{};
     for (final strategy in ShoppingStrategy.values) {
-      try {
-        result[strategy] = optimize(items: items, offers: offers, strategy: strategy);
-      } on StateError {
-        result[strategy] = null;
-      }
+      try { result[strategy] = optimize(items: items, offers: offers, strategy: strategy); }
+      on StateError { result[strategy] = null; }
     }
     return result;
   }
@@ -76,53 +72,38 @@ class BasketOptimizer {
     final subtotals = <String, int>{};
     final offersByMerchant = <String, MerchantOffer>{};
     var itemSubtotal = 0;
+    var preferenceScore = 0;
     for (final line in frozen) {
       itemSubtotal += line.subtotalTwd;
-      subtotals.update(line.offer.merchantId, (value) => value + line.subtotalTwd,
-          ifAbsent: () => line.subtotalTwd);
+      preferenceScore += line.preferenceScore;
+      subtotals.update(line.offer.merchantId, (value) => value + line.subtotalTwd, ifAbsent: () => line.subtotalTwd);
       offersByMerchant[line.offer.merchantId] = line.offer;
     }
-
     var shipping = 0;
     var shippingKnown = true;
     for (final entry in subtotals.entries) {
       final rule = offersByMerchant[entry.key]!;
-      if (!rule.shippingKnown) {
-        shippingKnown = false;
-        continue;
-      }
+      if (!rule.shippingKnown) { shippingKnown = false; continue; }
       final threshold = rule.freeShippingThresholdTwd;
       if (threshold == null || entry.value < threshold) shipping += rule.shippingFlatTwd;
     }
-    return ShoppingPlan(
-      lines: frozen,
-      itemSubtotalTwd: itemSubtotal,
-      shippingTwd: shipping,
-      totalTwd: itemSubtotal + shipping,
-      merchantCount: subtotals.length,
-      shippingKnown: shippingKnown,
-    );
+    return ShoppingPlan(lines: frozen, itemSubtotalTwd: itemSubtotal, shippingTwd: shipping,
+      totalTwd: itemSubtotal + shipping, merchantCount: subtotals.length, shippingKnown: shippingKnown,
+      preferenceScore: preferenceScore);
   }
 
   bool _isBetter(ShoppingPlan candidate, ShoppingPlan current, ShoppingStrategy strategy) {
+    // Preferences rank before price after all hard constraints have been applied.
+    if (candidate.preferenceScore != current.preferenceScore) return candidate.preferenceScore > current.preferenceScore;
     if (strategy == ShoppingStrategy.fewestMerchants) {
-      if (candidate.merchantCount != current.merchantCount) {
-        return candidate.merchantCount < current.merchantCount;
-      }
+      if (candidate.merchantCount != current.merchantCount) return candidate.merchantCount < current.merchantCount;
       if (candidate.shippingKnown != current.shippingKnown) return candidate.shippingKnown;
       return candidate.totalTwd < current.totalTwd;
     }
-
-    // For price strategies, verified delivery cost beats a lower visible item
-    // subtotal whose shipping is still unknown. If both are unknown, the
-    // subtotal is only a provisional ordering and the UI must label it so.
-    if (candidate.shippingKnown != current.shippingKnown) {
-      return candidate.shippingKnown;
-    }
+    if (candidate.shippingKnown != current.shippingKnown) return candidate.shippingKnown;
     return switch (strategy) {
-      ShoppingStrategy.lowestDeliveredTotal =>
-        candidate.totalTwd < current.totalTwd ||
-            (candidate.totalTwd == current.totalTwd && candidate.merchantCount < current.merchantCount),
+      ShoppingStrategy.lowestDeliveredTotal => candidate.totalTwd < current.totalTwd ||
+          (candidate.totalTwd == current.totalTwd && candidate.merchantCount < current.merchantCount),
       ShoppingStrategy.lowestOneStopTotal => candidate.totalTwd < current.totalTwd,
       ShoppingStrategy.fewestMerchants => false,
     };
