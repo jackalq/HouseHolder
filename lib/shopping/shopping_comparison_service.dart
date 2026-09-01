@@ -25,7 +25,7 @@ class ShoppingComparisonService {
   const ShoppingComparisonService({
     required this.providers,
     this.optimizer = const BasketOptimizer(),
-    this.maxOfferAge = const Duration(hours: 24),
+    this.maxOfferAge = const Duration(days: 7),
     this.now,
   });
 
