@@ -22,7 +22,10 @@ class BasketOptimizer {
       final matches = offers
           .where((offer) => offer.itemKey == item.itemKey && offer.inStock)
           .toList()
-        ..sort((a, b) => a.unitPriceTwd.compareTo(b.unitPriceTwd));
+        ..sort((a, b) {
+          if (a.shippingKnown != b.shippingKnown) return a.shippingKnown ? -1 : 1;
+          return a.unitPriceTwd.compareTo(b.unitPriceTwd);
+        });
       if (matches.isEmpty) throw StateError('No in-stock offer for ${item.label}.');
       candidates.add(matches.take(maxOffersPerItem).toList(growable: false));
     }
@@ -81,8 +84,13 @@ class BasketOptimizer {
     }
 
     var shipping = 0;
+    var shippingKnown = true;
     for (final entry in subtotals.entries) {
       final rule = offersByMerchant[entry.key]!;
+      if (!rule.shippingKnown) {
+        shippingKnown = false;
+        continue;
+      }
       final threshold = rule.freeShippingThresholdTwd;
       if (threshold == null || entry.value < threshold) shipping += rule.shippingFlatTwd;
     }
@@ -92,10 +100,18 @@ class BasketOptimizer {
       shippingTwd: shipping,
       totalTwd: itemSubtotal + shipping,
       merchantCount: subtotals.length,
+      shippingKnown: shippingKnown,
     );
   }
 
   bool _isBetter(ShoppingPlan candidate, ShoppingPlan current, ShoppingStrategy strategy) {
+    // A plan with verified delivery cost must always beat an otherwise
+    // comparable plan whose shipping is unknown. If both are unknown, use the
+    // visible subtotal only as a provisional ordering, never as a delivered
+    // total claim in the UI.
+    if (candidate.shippingKnown != current.shippingKnown) {
+      return candidate.shippingKnown;
+    }
     return switch (strategy) {
       ShoppingStrategy.lowestDeliveredTotal =>
         candidate.totalTwd < current.totalTwd ||
