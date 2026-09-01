@@ -167,12 +167,19 @@ class _PlanCard extends StatelessWidget {
           : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
               const SizedBox(height: 4),
-              Text('總價 NT\$${value.totalTwd}（商品 ${value.itemSubtotalTwd} + 運費 ${value.shippingTwd}） · ${value.merchantCount} 家'),
+              Text(value.shippingKnown
+                  ? '總價 NT\$${value.totalTwd}（商品 ${value.itemSubtotalTwd} + 運費 ${value.shippingTwd}） · ${value.merchantCount} 家'
+                  : '商品小計 NT\$${value.itemSubtotalTwd} · 運費待商家頁確認 · ${value.merchantCount} 家'),
+              if (!value.shippingKnown)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text('此方案不能宣稱為真正的含運最低價；系統會優先選擇有明確運費資料的方案。'),
+                ),
               const Divider(),
               for (final line in value.lines) ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('${line.request.label} → ${line.offer.merchantName}'),
-                subtitle: Text('${line.offer.title}\n小計 NT\$${line.subtotalTwd}'),
+                subtitle: Text('${line.offer.title}\n小計 NT\$${line.subtotalTwd} · ${line.offer.shippingKnown ? '運費已取得' : '運費待確認'}\n價格時間 ${line.offer.observedAt.toLocal()}'),
                 isThreeLine: true,
                 trailing: IconButton(key: ValueKey('purchase-${line.offer.itemKey}-${line.offer.merchantId}'), tooltip: '開啟購買連結', onPressed: () => onOpenUrl(line.offer.url), icon: const Icon(Icons.open_in_new)),
               ),
