@@ -17,6 +17,7 @@ class MerchantOffer {
     required this.observedAt,
     this.shippingFlatTwd = 0,
     this.freeShippingThresholdTwd,
+    this.shippingKnown = true,
     this.inStock = true,
   });
 
@@ -27,6 +28,11 @@ class MerchantOffer {
   final int unitPriceTwd;
   final int shippingFlatTwd;
   final int? freeShippingThresholdTwd;
+
+  /// True only when the provider has enough information to calculate delivery.
+  /// Public search pages frequently omit shipping; callers must never interpret
+  /// a zero placeholder as free shipping when this is false.
+  final bool shippingKnown;
   final String url;
   final DateTime observedAt;
   final bool inStock;
@@ -46,13 +52,18 @@ class ShoppingPlan {
     required this.shippingTwd,
     required this.totalTwd,
     required this.merchantCount,
+    required this.shippingKnown,
   });
 
   final List<ShoppingPlanLine> lines;
   final int itemSubtotalTwd;
+
+  /// Sum of the delivery charges that are actually known. When
+  /// [shippingKnown] is false this is not the complete delivery cost.
   final int shippingTwd;
   final int totalTwd;
   final int merchantCount;
+  final bool shippingKnown;
 
   List<String> get purchaseUrls => lines.map((line) => line.offer.url).toSet().toList(growable: false);
 }
