@@ -125,8 +125,14 @@ class _ShoppingComparePageState extends State<ShoppingComparePage> {
       )).toList(growable: false);
       final comparison = await widget.services.shoppingComparison.compare(requests);
       if (!mounted) return;
-      final failedCount = comparison.providerErrors.length;
-      final suffix = failedCount == 0 ? '' : '；另有 $failedCount 個來源暫時無法取得，已保留其他來源結果';
+      final parts = <String>[];
+      if (comparison.providerErrors.isNotEmpty) {
+        parts.add('另有 ${comparison.providerErrors.length} 個來源暫時無法取得，已保留其他來源結果');
+      }
+      if (comparison.staleOfferCount > 0) {
+        parts.add('已排除 ${comparison.staleOfferCount} 筆過期報價');
+      }
+      final suffix = parts.isEmpty ? '' : '；${parts.join('；')}';
       setState(() {
         _comparison = comparison;
         _message = '找到 ${comparison.offers.length} 筆即時報價$suffix。價格、庫存與運費以商家頁面結帳時為準。';
@@ -218,13 +224,23 @@ class _PlanCard extends StatelessWidget {
   final ShoppingPlan? plan;
   final Future<void> Function(String url) onOpenUrl;
 
+  String _number(double value) => value.toStringAsFixed(value % 1 == 0 ? 0 : 1);
+
   String _packagePrice(MerchantOffer offer) {
     final package = PackageQuantity.parse(offer.title);
     if (package == null || package.baseQuantity <= 0) return '規格無法正規化';
     final divisor = package.baseUnit == 'ml' || package.baseUnit == 'g' ? 100 : 1;
     final price = offer.unitPriceTwd / package.baseQuantity * divisor;
     final basis = divisor == 1 ? package.baseUnit : '100${package.baseUnit}';
-    return '規格 ${package.baseQuantity.toStringAsFixed(package.baseQuantity % 1 == 0 ? 0 : 1)} ${package.baseUnit} · 約 NT\$${price.toStringAsFixed(2)}/$basis';
+    return '規格 ${_number(package.baseQuantity)} ${package.baseUnit} · 約 NT\$${price.toStringAsFixed(2)}/$basis';
+  }
+
+  String _fulfillment(ShoppingPlanLine line) {
+    if (!line.usesNormalizedFulfillment) return '購買 ${line.packagesToBuy} 件（規格無法安全換算）';
+    final requested = line.requestedPackageQuantity!;
+    final target = requested.baseQuantity * line.request.quantity;
+    final fulfilled = line.fulfilledBaseQuantity!;
+    return '需求 ${_number(target)} ${requested.baseUnit} · 購買 ${line.packagesToBuy} 組 · 實得 ${_number(fulfilled)} ${requested.baseUnit}';
   }
 
   @override
@@ -251,7 +267,7 @@ class _PlanCard extends StatelessWidget {
               for (final line in value.lines) ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('${line.request.label} → ${line.offer.merchantName}'),
-                subtitle: Text('${line.offer.title}\n${_packagePrice(line.offer)}\n小計 NT\$${line.subtotalTwd} · ${line.offer.shippingKnown ? '運費已取得' : '運費待確認'}\n價格時間 ${line.offer.observedAt.toLocal()}'),
+                subtitle: Text('${line.offer.title}\n${_packagePrice(line.offer)}\n${_fulfillment(line)}\n小計 NT\$${line.subtotalTwd} · ${line.offer.shippingKnown ? '運費已取得' : '運費待確認'}\n價格時間 ${line.offer.observedAt.toLocal()}'),
                 isThreeLine: true,
                 trailing: IconButton(key: ValueKey('purchase-${line.offer.itemKey}-${line.offer.merchantId}'), tooltip: '開啟購買連結', onPressed: () => onOpenUrl(line.offer.url), icon: const Icon(Icons.open_in_new)),
               ),
