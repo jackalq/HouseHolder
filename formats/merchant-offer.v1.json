@@ -8,8 +8,12 @@
     "merchantName": {"type": "string", "minLength": 1},
     "title": {"type": "string", "minLength": 1},
     "unitPriceTwd": {"type": "integer", "minimum": 1},
-    "shippingFlatTwd": {"type": "integer", "minimum": 0, "default": 0},
+    "shippingFlatTwd": {"type": "integer", "minimum": 0},
     "freeShippingThresholdTwd": {"type": ["integer", "null"], "minimum": 0},
+    "shippingKnown": {
+      "type": "boolean",
+      "description": "True only when delivery cost can be calculated from this offer. False means a missing/zero shipping value must not be treated as free shipping."
+    },
     "url": {"type": "string", "format": "uri"},
     "observedAt": {"type": ["string", "null"], "format": "date-time"},
     "inStock": {"type": "boolean", "default": true}
