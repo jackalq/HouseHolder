@@ -4,6 +4,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app_services.dart';
 import '../../domain/entity_ids.dart';
 import '../../shopping/merchant_offer.dart';
+import '../../shopping/package_quantity.dart';
+import '../../shopping/product_preference.dart';
 import '../../shopping/shopping_comparison_service.dart';
 import 'shopping_item.dart';
 
@@ -49,6 +51,59 @@ class _ShoppingComparePageState extends State<ShoppingComparePage> {
     if (mounted) setState(() { _comparison = null; _reload(); });
   }
 
+  List<String> _terms(String value) => value
+      .split(RegExp(r'[,，]'))
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toSet()
+      .toList(growable: false);
+
+  Future<void> _editPreference(HouseholdShoppingItem item) async {
+    final required = TextEditingController(text: item.preference.requiredTerms.join('，'));
+    final excluded = TextEditingController(text: item.preference.excludedTerms.join('，'));
+    final preferred = TextEditingController(text: item.preference.preferredTerms.join('，'));
+    final merchants = TextEditingController(text: item.preference.preferredMerchants.join('，'));
+    final result = await showDialog<ProductPreference>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${item.name} 商品偏好'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: required, decoration: const InputDecoration(labelText: '必須包含（逗號分隔）', hintText: '例如：全脂，無糖')),
+            TextField(controller: excluded, decoration: const InputDecoration(labelText: '不要包含', hintText: '例如：保久乳，香味')),
+            TextField(controller: preferred, decoration: const InputDecoration(labelText: '優先偏好', hintText: '例如：品牌A，補充包')),
+            TextField(controller: merchants, decoration: const InputDecoration(labelText: '偏好商家', hintText: '例如：momo，PChome')),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, ProductPreference(
+              requiredTerms: _terms(required.text),
+              excludedTerms: _terms(excluded.text),
+              preferredTerms: _terms(preferred.text),
+              preferredMerchants: _terms(merchants.text),
+            )),
+            child: const Text('儲存'),
+          ),
+        ],
+      ),
+    );
+    required.dispose(); excluded.dispose(); preferred.dispose(); merchants.dispose();
+    if (result == null) return;
+    await widget.services.shopping.setPreference(item.id, result);
+    if (mounted) setState(() { _comparison = null; _reload(); });
+  }
+
+  String _preferenceSummary(ProductPreference p) {
+    final parts = <String>[];
+    if (p.requiredTerms.isNotEmpty) parts.add('必須 ${p.requiredTerms.join('、')}');
+    if (p.excludedTerms.isNotEmpty) parts.add('排除 ${p.excludedTerms.join('、')}');
+    if (p.preferredTerms.isNotEmpty) parts.add('偏好 ${p.preferredTerms.join('、')}');
+    if (p.preferredMerchants.isNotEmpty) parts.add('商家 ${p.preferredMerchants.join('、')}');
+    return parts.isEmpty ? '未設定商品偏好' : parts.join(' · ');
+  }
+
   Future<void> _compare(List<HouseholdShoppingItem> allItems) async {
     if (_busy) return;
     final items = allItems.where((item) => !item.done).toList(growable: false);
@@ -60,12 +115,13 @@ class _ShoppingComparePageState extends State<ShoppingComparePage> {
       setState(() => _message = '購物清單目前沒有待購項目。');
       return;
     }
-    setState(() { _busy = true; _message = '正在搜尋公開商家頁面並計算購物組合…'; _comparison = null; });
+    setState(() { _busy = true; _message = '正在搜尋公開商家頁面並依商品偏好計算購物組合…'; _comparison = null; });
     try {
       final requests = items.map((item) => ShoppingRequestItem(
         itemKey: item.id,
         label: '${item.name} ${item.quantity}${item.unit}${item.note == null ? '' : ' ${item.note}'}',
         quantity: item.quantity,
+        preference: item.preference,
       )).toList(growable: false);
       final comparison = await widget.services.shoppingComparison.compare(requests);
       if (!mounted) return;
@@ -126,7 +182,13 @@ class _ShoppingComparePageState extends State<ShoppingComparePage> {
                   value: item.done,
                   onChanged: (value) => _setDone(item, value ?? false),
                   title: Text(item.name),
-                  subtitle: Text('${item.quantity}${item.unit}${item.note == null ? '' : ' · ${item.note}'}'),
+                  subtitle: Text('${item.quantity}${item.unit}${item.note == null ? '' : ' · ${item.note}'}\n${_preferenceSummary(item.preference)}'),
+                  secondary: IconButton(
+                    key: ValueKey('shopping-preference-${item.id}'),
+                    tooltip: '商品偏好',
+                    onPressed: () => _editPreference(item),
+                    icon: const Icon(Icons.tune),
+                  ),
                 )),
                 const SizedBox(height: 12),
                 FilledButton.icon(
@@ -156,6 +218,15 @@ class _PlanCard extends StatelessWidget {
   final ShoppingPlan? plan;
   final Future<void> Function(String url) onOpenUrl;
 
+  String _packagePrice(MerchantOffer offer) {
+    final package = PackageQuantity.parse(offer.title);
+    if (package == null || package.baseQuantity <= 0) return '規格無法正規化';
+    final divisor = package.baseUnit == 'ml' || package.baseUnit == 'g' ? 100 : 1;
+    final price = offer.unitPriceTwd / package.baseQuantity * divisor;
+    final basis = divisor == 1 ? package.baseUnit : '100${package.baseUnit}';
+    return '規格 ${package.baseQuantity.toStringAsFixed(package.baseQuantity % 1 == 0 ? 0 : 1)} ${package.baseUnit} · 約 NT\$${price.toStringAsFixed(2)}/$basis';
+  }
+
   @override
   Widget build(BuildContext context) {
     final value = plan;
@@ -163,13 +234,14 @@ class _PlanCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: value == null
-          ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.w600)), const SizedBox(height: 6), const Text('沒有符合此策略的完整購物方案。')])
+          ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.w600)), const SizedBox(height: 6), const Text('沒有符合此策略與商品偏好的完整購物方案。')])
           : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
               const SizedBox(height: 4),
               Text(value.shippingKnown
                   ? '總價 NT\$${value.totalTwd}（商品 ${value.itemSubtotalTwd} + 運費 ${value.shippingTwd}） · ${value.merchantCount} 家'
                   : '商品小計 NT\$${value.itemSubtotalTwd} · 運費待商家頁確認 · ${value.merchantCount} 家'),
+              if (value.preferenceScore > 0) Text('商品偏好分數 ${value.preferenceScore}'),
               if (!value.shippingKnown)
                 const Padding(
                   padding: EdgeInsets.only(top: 4),
@@ -179,7 +251,7 @@ class _PlanCard extends StatelessWidget {
               for (final line in value.lines) ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('${line.request.label} → ${line.offer.merchantName}'),
-                subtitle: Text('${line.offer.title}\n小計 NT\$${line.subtotalTwd} · ${line.offer.shippingKnown ? '運費已取得' : '運費待確認'}\n價格時間 ${line.offer.observedAt.toLocal()}'),
+                subtitle: Text('${line.offer.title}\n${_packagePrice(line.offer)}\n小計 NT\$${line.subtotalTwd} · ${line.offer.shippingKnown ? '運費已取得' : '運費待確認'}\n價格時間 ${line.offer.observedAt.toLocal()}'),
                 isThreeLine: true,
                 trailing: IconButton(key: ValueKey('purchase-${line.offer.itemKey}-${line.offer.merchantId}'), tooltip: '開啟購買連結', onPressed: () => onOpenUrl(line.offer.url), icon: const Icon(Icons.open_in_new)),
               ),
