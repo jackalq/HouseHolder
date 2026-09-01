@@ -85,6 +85,13 @@ class HttpMerchantOfferProvider implements MerchantOfferProvider {
     final observedAt = observedText is String ? DateTime.tryParse(observedText) : null;
     final inStock = json['inStock'] ?? true;
     if (inStock is! bool) throw const FormatException('inStock must be boolean.');
+    final shippingKnownRaw = json['shippingKnown'];
+    if (shippingKnownRaw != null && shippingKnownRaw is! bool) {
+      throw const FormatException('shippingKnown must be boolean.');
+    }
+    final shippingKnown = shippingKnownRaw is bool
+        ? shippingKnownRaw
+        : json.containsKey('shippingFlatTwd') || json.containsKey('freeShippingThresholdTwd');
 
     return MerchantOffer(
       itemKey: itemKey,
@@ -94,6 +101,7 @@ class HttpMerchantOfferProvider implements MerchantOfferProvider {
       unitPriceTwd: price,
       shippingFlatTwd: nonNegativeInt('shippingFlatTwd'),
       freeShippingThresholdTwd: threshold,
+      shippingKnown: shippingKnown,
       url: url.toString(),
       observedAt: observedAt?.toUtc() ?? DateTime.now().toUtc(),
       inStock: inStock,
