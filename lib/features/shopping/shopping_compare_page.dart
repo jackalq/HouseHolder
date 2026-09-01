@@ -119,7 +119,7 @@ class _ShoppingComparePageState extends State<ShoppingComparePage> {
     try {
       final requests = items.map((item) => ShoppingRequestItem(
         itemKey: item.id,
-        label: '${item.name} ${item.quantity}${item.unit}${item.note == null ? '' : ' ${item.note}'}',
+        label: '${item.name}${item.note == null ? '' : ' ${item.note}'}',
         quantity: item.quantity,
         preference: item.preference,
       )).toList(growable: false);
