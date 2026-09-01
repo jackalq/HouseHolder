@@ -105,10 +105,17 @@ class BasketOptimizer {
   }
 
   bool _isBetter(ShoppingPlan candidate, ShoppingPlan current, ShoppingStrategy strategy) {
-    // A plan with verified delivery cost must always beat an otherwise
-    // comparable plan whose shipping is unknown. If both are unknown, use the
-    // visible subtotal only as a provisional ordering, never as a delivered
-    // total claim in the UI.
+    if (strategy == ShoppingStrategy.fewestMerchants) {
+      if (candidate.merchantCount != current.merchantCount) {
+        return candidate.merchantCount < current.merchantCount;
+      }
+      if (candidate.shippingKnown != current.shippingKnown) return candidate.shippingKnown;
+      return candidate.totalTwd < current.totalTwd;
+    }
+
+    // For price strategies, verified delivery cost beats a lower visible item
+    // subtotal whose shipping is still unknown. If both are unknown, the
+    // subtotal is only a provisional ordering and the UI must label it so.
     if (candidate.shippingKnown != current.shippingKnown) {
       return candidate.shippingKnown;
     }
@@ -117,9 +124,7 @@ class BasketOptimizer {
         candidate.totalTwd < current.totalTwd ||
             (candidate.totalTwd == current.totalTwd && candidate.merchantCount < current.merchantCount),
       ShoppingStrategy.lowestOneStopTotal => candidate.totalTwd < current.totalTwd,
-      ShoppingStrategy.fewestMerchants =>
-        candidate.merchantCount < current.merchantCount ||
-            (candidate.merchantCount == current.merchantCount && candidate.totalTwd < current.totalTwd),
+      ShoppingStrategy.fewestMerchants => false,
     };
   }
 }
