@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package_quantity.dart';
 import 'product_preference.dart';
 
 class ShoppingRequestItem {
@@ -10,8 +13,13 @@ class ShoppingRequestItem {
 
   final String itemKey;
   final String label;
+
+  /// Number of requested household units. When [label] also contains a
+  /// comparable package size, this multiplies that requested base quantity.
   final int quantity;
   final ProductPreference preference;
+
+  PackageQuantity? get packageQuantity => PackageQuantity.parse(label);
 }
 
 class MerchantOffer {
@@ -40,13 +48,46 @@ class MerchantOffer {
   final String url;
   final DateTime observedAt;
   final bool inStock;
+
+  PackageQuantity? get packageQuantity => PackageQuantity.parse(title);
 }
 
 class ShoppingPlanLine {
   const ShoppingPlanLine({required this.request, required this.offer});
   final ShoppingRequestItem request;
   final MerchantOffer offer;
-  int get subtotalTwd => request.quantity * offer.unitPriceTwd;
+
+  PackageQuantity? get requestedPackageQuantity => request.packageQuantity;
+  PackageQuantity? get offerPackageQuantity => offer.packageQuantity;
+
+  bool get usesNormalizedFulfillment {
+    final requested = requestedPackageQuantity;
+    final offered = offerPackageQuantity;
+    return requested != null && offered != null && requested.compatibleWith(offered);
+  }
+
+  /// Number of merchant packages required to satisfy the requested quantity.
+  /// Falls back to the historical item-count behavior when package dimensions
+  /// cannot be compared safely.
+  int get packagesToBuy {
+    final requested = requestedPackageQuantity;
+    final offered = offerPackageQuantity;
+    if (requested == null || offered == null || !requested.compatibleWith(offered)) {
+      return request.quantity;
+    }
+    final requiredBaseQuantity = requested.baseQuantity * request.quantity;
+    return math.max(1, (requiredBaseQuantity / offered.baseQuantity).ceil());
+  }
+
+  double? get fulfilledBaseQuantity {
+    final offered = offerPackageQuantity;
+    return usesNormalizedFulfillment && offered != null
+        ? offered.baseQuantity * packagesToBuy
+        : null;
+  }
+
+  int get subtotalTwd => packagesToBuy * offer.unitPriceTwd;
+
   int get preferenceScore => request.preference.score(
         title: offer.title,
         merchantId: offer.merchantId,
