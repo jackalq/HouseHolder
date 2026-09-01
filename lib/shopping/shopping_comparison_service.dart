@@ -3,9 +3,18 @@ import 'merchant_offer.dart';
 import 'merchant_offer_provider.dart';
 
 class ShoppingComparison {
-  const ShoppingComparison({required this.offers, required this.plans});
+  const ShoppingComparison({
+    required this.offers,
+    required this.plans,
+    this.providerErrors = const {},
+  });
+
   final List<MerchantOffer> offers;
   final Map<ShoppingStrategy, ShoppingPlan?> plans;
+
+  /// Provider id -> human-readable error. A crawler failure is isolated so
+  /// other merchants can still contribute live offers.
+  final Map<String, String> providerErrors;
 }
 
 class ShoppingComparisonService {
@@ -19,9 +28,16 @@ class ShoppingComparisonService {
 
   Future<ShoppingComparison> compare(List<ShoppingRequestItem> items) async {
     final offers = <MerchantOffer>[];
+    final providerErrors = <String, String>{};
     for (final item in items) {
       for (final provider in providers) {
-        offers.addAll(await provider.search(item));
+        try {
+          offers.addAll(await provider.search(item));
+        } on UnsupportedError {
+          rethrow;
+        } catch (error) {
+          providerErrors[provider.id] = error.toString();
+        }
       }
     }
     final deduped = <String, MerchantOffer>{};
@@ -34,6 +50,7 @@ class ShoppingComparisonService {
     return ShoppingComparison(
       offers: normalized,
       plans: optimizer.compareStrategies(items: items, offers: normalized),
+      providerErrors: Map.unmodifiable(providerErrors),
     );
   }
 }
