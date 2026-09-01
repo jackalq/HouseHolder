@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:family_butler/shopping/merchant_offer.dart';
 import 'package:family_butler/shopping/pchome_web_offer_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,7 +12,7 @@ void main() {
     final provider = PchomeWebOfferProvider(
       client: MockClient((value) async {
         request = value;
-        return http.Response('''
+        return http.Response.bytes(utf8.encode('''
 <html><head>
 <script type="application/ld+json">
 {
@@ -39,7 +41,7 @@ void main() {
 }
 </script>
 </head></html>
-''', 200, headers: {'content-type': 'text/html; charset=utf-8'});
+'''), 200, headers: {'content-type': 'text/html; charset=utf-8'});
       }),
     );
 
@@ -59,9 +61,9 @@ void main() {
 
   test('falls back to product anchors when structured metadata is absent', () async {
     final provider = PchomeWebOfferProvider(
-      client: MockClient((_) async => http.Response('''
+      client: MockClient((_) async => http.Response.bytes(utf8.encode('''
 <a href="/prod/DMABCD-A900XYZ">家庭用衛生紙 12包 <span>NT\$299</span></a>
-''', 200)),
+'''), 200, headers: {'content-type': 'text/html; charset=utf-8'})),
     );
 
     final offers = await provider.search(
