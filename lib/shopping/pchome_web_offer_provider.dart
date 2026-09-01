@@ -94,7 +94,7 @@ class PchomeWebOfferProvider implements MerchantOfferProvider {
 
   Iterable<Map<String, Object?>> _extractJsonLdProducts(String html) sync* {
     final scripts = RegExp(
-      r'<script[^>]*type\s*=\s*["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+      r'''<script[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>([\s\S]*?)</script>''',
       caseSensitive: false,
     );
     for (final match in scripts.allMatches(html)) {
@@ -135,7 +135,7 @@ class PchomeWebOfferProvider implements MerchantOfferProvider {
 
   Iterable<_FallbackOffer> _extractAnchorCards(String html) sync* {
     final anchorPattern = RegExp(
-      r'<a\b[^>]*href\s*=\s*["\']([^"\']*(?:/prod/|/prod\?)[^"\']*)["\'][^>]*>([\s\S]*?)</a>',
+      r'''<a\b[^>]*href\s*=\s*["']([^"']*(?:/prod/|/prod\?)[^"']*)["'][^>]*>([\s\S]*?)</a>''',
       caseSensitive: false,
     );
     for (final match in anchorPattern.allMatches(html)) {
