@@ -53,14 +53,14 @@ class _ShoppingComparePageState extends State<ShoppingComparePage> {
     if (_busy) return;
     final items = allItems.where((item) => !item.done).toList(growable: false);
     if (widget.services.shoppingComparison.providers.isEmpty) {
-      setState(() => _message = '尚未設定網路報價 Provider。請依 docs/OFFER_SEARCH_ENDPOINT.md 設定 HOUSEHOLDER_OFFER_ENDPOINT。');
+      setState(() => _message = '目前沒有可用的網路報價來源。');
       return;
     }
     if (items.isEmpty) {
       setState(() => _message = '購物清單目前沒有待購項目。');
       return;
     }
-    setState(() { _busy = true; _message = '正在取得商家報價並計算購物組合…'; _comparison = null; });
+    setState(() { _busy = true; _message = '正在搜尋公開商家頁面並計算購物組合…'; _comparison = null; });
     try {
       final requests = items.map((item) => ShoppingRequestItem(
         itemKey: item.id,
@@ -69,7 +69,12 @@ class _ShoppingComparePageState extends State<ShoppingComparePage> {
       )).toList(growable: false);
       final comparison = await widget.services.shoppingComparison.compare(requests);
       if (!mounted) return;
-      setState(() { _comparison = comparison; _message = '找到 ${comparison.offers.length} 筆可比較報價。價格與庫存以商家頁面結帳時為準。'; });
+      final failedCount = comparison.providerErrors.length;
+      final suffix = failedCount == 0 ? '' : '；另有 $failedCount 個來源暫時無法取得，已保留其他來源結果';
+      setState(() {
+        _comparison = comparison;
+        _message = '找到 ${comparison.offers.length} 筆即時報價$suffix。價格、庫存與運費以商家頁面結帳時為準。';
+      });
     } catch (error) {
       if (mounted) setState(() => _message = '比價失敗：$error');
     } finally {
