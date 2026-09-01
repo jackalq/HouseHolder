@@ -32,4 +32,19 @@ void main() {
     });
     expect(restored.preference.isEmpty, isTrue);
   });
+
+  test('comparison request does not duplicate shopping list quantity in label', () {
+    const item = HouseholdShoppingItem(
+      id: 'shopping-2',
+      name: '鮮乳 1000ml',
+      quantity: 2,
+      unit: '瓶',
+      note: '全脂',
+    );
+
+    final request = item.toComparisonRequest();
+    expect(request.label, '鮮乳 1000ml 全脂');
+    expect(request.quantity, 2);
+    expect(request.packageQuantity!.baseQuantity, 1000);
+  });
 }
