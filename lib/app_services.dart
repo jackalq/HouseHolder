@@ -8,6 +8,7 @@ import 'features/shopping/shopping_repository.dart';
 import 'features/todo/todo_repository.dart';
 import 'shopping/http_offer_provider.dart';
 import 'shopping/merchant_offer_provider.dart';
+import 'shopping/pchome_web_offer_provider.dart';
 import 'shopping/shopping_comparison_service.dart';
 import 'storage/device_identity.dart';
 import 'storage/entity_event_writer.dart';
@@ -68,8 +69,13 @@ class AppServices {
     );
     final conflicts = SyncConflictInbox(documents: documents, writer: writer);
 
+    // Built-in public-web provider: ordinary users do not need to configure or
+    // maintain prices manually. Additional normalized providers may still be
+    // supplied through HOUSEHOLDER_OFFER_ENDPOINT when desired.
     const endpointText = String.fromEnvironment('HOUSEHOLDER_OFFER_ENDPOINT');
-    final providers = <MerchantOfferProvider>[];
+    final providers = <MerchantOfferProvider>[
+      PchomeWebOfferProvider(),
+    ];
     if (endpointText.trim().isNotEmpty) {
       final endpoint = Uri.tryParse(endpointText);
       if (endpoint == null || !endpoint.hasScheme || endpoint.host.isEmpty) {
