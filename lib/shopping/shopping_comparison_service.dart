@@ -7,6 +7,7 @@ class ShoppingComparison {
     required this.offers,
     required this.plans,
     this.providerErrors = const {},
+    this.staleOfferCount = 0,
   });
 
   final List<MerchantOffer> offers;
@@ -15,16 +16,23 @@ class ShoppingComparison {
   /// Provider id -> human-readable error. A crawler failure is isolated so
   /// other merchants can still contribute live offers.
   final Map<String, String> providerErrors;
+
+  /// Offers older than the accepted freshness window are not used for plans.
+  final int staleOfferCount;
 }
 
 class ShoppingComparisonService {
   const ShoppingComparisonService({
     required this.providers,
     this.optimizer = const BasketOptimizer(),
+    this.maxOfferAge = const Duration(hours: 24),
+    this.now,
   });
 
   final List<MerchantOfferProvider> providers;
   final BasketOptimizer optimizer;
+  final Duration maxOfferAge;
+  final DateTime Function()? now;
 
   Future<ShoppingComparison> compare(List<ShoppingRequestItem> items) async {
     final offers = <MerchantOffer>[];
@@ -46,11 +54,20 @@ class ShoppingComparisonService {
       final existing = deduped[key];
       if (existing == null || offer.observedAt.isAfter(existing.observedAt)) deduped[key] = offer;
     }
-    final normalized = deduped.values.toList(growable: false);
+
+    final cutoff = (now?.call() ?? DateTime.now().toUtc()).toUtc().subtract(maxOfferAge);
+    var staleOfferCount = 0;
+    final normalized = deduped.values.where((offer) {
+      final fresh = !offer.observedAt.toUtc().isBefore(cutoff);
+      if (!fresh) staleOfferCount++;
+      return fresh;
+    }).toList(growable: false);
+
     return ShoppingComparison(
       offers: normalized,
       plans: optimizer.compareStrategies(items: items, offers: normalized),
       providerErrors: Map.unmodifiable(providerErrors),
+      staleOfferCount: staleOfferCount,
     );
   }
 }
