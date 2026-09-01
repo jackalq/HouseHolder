@@ -1,9 +1,17 @@
+import 'product_preference.dart';
+
 class ShoppingRequestItem {
-  const ShoppingRequestItem({required this.itemKey, required this.label, this.quantity = 1});
+  const ShoppingRequestItem({
+    required this.itemKey,
+    required this.label,
+    this.quantity = 1,
+    this.preference = const ProductPreference(),
+  });
 
   final String itemKey;
   final String label;
   final int quantity;
+  final ProductPreference preference;
 }
 
 class MerchantOffer {
@@ -28,10 +36,6 @@ class MerchantOffer {
   final int unitPriceTwd;
   final int shippingFlatTwd;
   final int? freeShippingThresholdTwd;
-
-  /// True only when the provider has enough information to calculate delivery.
-  /// Public search pages frequently omit shipping; callers must never interpret
-  /// a zero placeholder as free shipping when this is false.
   final bool shippingKnown;
   final String url;
   final DateTime observedAt;
@@ -43,6 +47,11 @@ class ShoppingPlanLine {
   final ShoppingRequestItem request;
   final MerchantOffer offer;
   int get subtotalTwd => request.quantity * offer.unitPriceTwd;
+  int get preferenceScore => request.preference.score(
+        title: offer.title,
+        merchantId: offer.merchantId,
+        merchantName: offer.merchantName,
+      );
 }
 
 class ShoppingPlan {
@@ -53,17 +62,16 @@ class ShoppingPlan {
     required this.totalTwd,
     required this.merchantCount,
     required this.shippingKnown,
+    this.preferenceScore = 0,
   });
 
   final List<ShoppingPlanLine> lines;
   final int itemSubtotalTwd;
-
-  /// Sum of the delivery charges that are actually known. When
-  /// [shippingKnown] is false this is not the complete delivery cost.
   final int shippingTwd;
   final int totalTwd;
   final int merchantCount;
   final bool shippingKnown;
+  final int preferenceScore;
 
   List<String> get purchaseUrls => lines.map((line) => line.offer.url).toSet().toList(growable: false);
 }
