@@ -11,8 +11,8 @@ void main() {
     late http.Request request;
     final client = MockClient((value) async {
       request = value;
-      return http.Response(
-        jsonEncode({
+      return http.Response.bytes(
+        utf8.encode(jsonEncode({
           'offers': [
             {
               'merchantId': 'shop-a',
@@ -26,9 +26,9 @@ void main() {
               'inStock': true
             }
           ]
-        }),
+        })),
         200,
-        headers: {'content-type': 'application/json'},
+        headers: {'content-type': 'application/json; charset=utf-8'},
       );
     });
     final provider = HttpMerchantOfferProvider(
@@ -48,8 +48,8 @@ void main() {
   test('missing shipping fields are not interpreted as free shipping', () async {
     final provider = HttpMerchantOfferProvider(
       endpoint: Uri.parse('https://offers.example.com/search'),
-      client: MockClient((_) async => http.Response(
-        jsonEncode({
+      client: MockClient((_) async => http.Response.bytes(
+        utf8.encode(jsonEncode({
           'offers': [
             {
               'merchantId': 'shop-a',
@@ -59,8 +59,9 @@ void main() {
               'url': 'https://example.com/tissue'
             }
           ]
-        }),
+        })),
         200,
+        headers: {'content-type': 'application/json; charset=utf-8'},
       )),
     );
 
