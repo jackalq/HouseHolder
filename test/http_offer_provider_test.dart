@@ -42,6 +42,34 @@ void main() {
     expect(jsonDecode(request.body)['market'], 'TW');
     expect(offers.single.unitPriceTwd, 95);
     expect(offers.single.shippingFlatTwd, 60);
+    expect(offers.single.shippingKnown, isTrue);
+  });
+
+  test('missing shipping fields are not interpreted as free shipping', () async {
+    final provider = HttpMerchantOfferProvider(
+      endpoint: Uri.parse('https://offers.example.com/search'),
+      client: MockClient((_) async => http.Response(
+        jsonEncode({
+          'offers': [
+            {
+              'merchantId': 'shop-a',
+              'merchantName': '商家 A',
+              'title': '衛生紙',
+              'unitPriceTwd': 199,
+              'url': 'https://example.com/tissue'
+            }
+          ]
+        }),
+        200,
+      )),
+    );
+
+    final offers = await provider.search(
+      const ShoppingRequestItem(itemKey: 'tissue', label: '衛生紙'),
+    );
+
+    expect(offers.single.shippingFlatTwd, 0);
+    expect(offers.single.shippingKnown, isFalse);
   });
 
   test('restricted shopping query is rejected before network request', () async {
