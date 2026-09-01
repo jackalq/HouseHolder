@@ -224,7 +224,7 @@ class MomoWebOfferProvider extends TwPublicWebOfferProvider {
             {'keyword': query},
           ),
           allowedHosts: const {'www.momoshop.com.tw', 'momoshop.com.tw'},
-          productHrefHints: const ['/goods/GoodsDetail.jsp', 'goods.momo'],
+          productHrefHints: const ['/goods/GoodsDetail.jsp', 'goods.momo', '/product/'],
           client: client,
         );
 }
