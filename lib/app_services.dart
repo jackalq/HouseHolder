@@ -11,6 +11,7 @@ import 'shopping/http_offer_provider.dart';
 import 'shopping/merchant_offer_provider.dart';
 import 'shopping/pchome_web_offer_provider.dart';
 import 'shopping/shopping_comparison_service.dart';
+import 'shopping/tw_public_web_offer_provider.dart';
 import 'storage/device_identity.dart';
 import 'storage/entity_event_writer.dart';
 import 'storage/json_repository.dart';
@@ -74,21 +75,20 @@ class AppServices {
     // maintain a price table. Short TTL caching avoids hammering merchant sites
     // while keeping prices fresh enough for an interactive comparison.
     const endpointText = String.fromEnvironment('HOUSEHOLDER_OFFER_ENDPOINT');
+    CachedMerchantOfferProvider cached(MerchantOfferProvider provider) =>
+        CachedMerchantOfferProvider(inner: provider, ttl: const Duration(minutes: 15));
+
     final providers = <MerchantOfferProvider>[
-      CachedMerchantOfferProvider(
-        inner: PchomeWebOfferProvider(),
-        ttl: const Duration(minutes: 15),
-      ),
+      cached(PchomeWebOfferProvider()),
+      cached(MomoWebOfferProvider()),
+      cached(YahooShoppingWebOfferProvider()),
     ];
     if (endpointText.trim().isNotEmpty) {
       final endpoint = Uri.tryParse(endpointText);
       if (endpoint == null || !endpoint.hasScheme || endpoint.host.isEmpty) {
         throw const FormatException('HOUSEHOLDER_OFFER_ENDPOINT is not a valid URI.');
       }
-      providers.add(CachedMerchantOfferProvider(
-        inner: HttpMerchantOfferProvider(endpoint: endpoint),
-        ttl: const Duration(minutes: 15),
-      ));
+      providers.add(cached(HttpMerchantOfferProvider(endpoint: endpoint)));
     }
     final shoppingComparison = ShoppingComparisonService(providers: providers);
 
