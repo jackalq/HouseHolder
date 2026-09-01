@@ -6,6 +6,7 @@ import 'assistant/family_action_executor.dart';
 import 'features/schedule/schedule_repository.dart';
 import 'features/shopping/shopping_repository.dart';
 import 'features/todo/todo_repository.dart';
+import 'shopping/cached_offer_provider.dart';
 import 'shopping/http_offer_provider.dart';
 import 'shopping/merchant_offer_provider.dart';
 import 'shopping/pchome_web_offer_provider.dart';
@@ -69,19 +70,25 @@ class AppServices {
     );
     final conflicts = SyncConflictInbox(documents: documents, writer: writer);
 
-    // Built-in public-web provider: ordinary users do not need to configure or
-    // maintain prices manually. Additional normalized providers may still be
-    // supplied through HOUSEHOLDER_OFFER_ENDPOINT when desired.
+    // Built-in public-web providers refresh automatically; nobody has to
+    // maintain a price table. Short TTL caching avoids hammering merchant sites
+    // while keeping prices fresh enough for an interactive comparison.
     const endpointText = String.fromEnvironment('HOUSEHOLDER_OFFER_ENDPOINT');
     final providers = <MerchantOfferProvider>[
-      PchomeWebOfferProvider(),
+      CachedMerchantOfferProvider(
+        inner: PchomeWebOfferProvider(),
+        ttl: const Duration(minutes: 15),
+      ),
     ];
     if (endpointText.trim().isNotEmpty) {
       final endpoint = Uri.tryParse(endpointText);
       if (endpoint == null || !endpoint.hasScheme || endpoint.host.isEmpty) {
         throw const FormatException('HOUSEHOLDER_OFFER_ENDPOINT is not a valid URI.');
       }
-      providers.add(HttpMerchantOfferProvider(endpoint: endpoint));
+      providers.add(CachedMerchantOfferProvider(
+        inner: HttpMerchantOfferProvider(endpoint: endpoint),
+        ttl: const Duration(minutes: 15),
+      ));
     }
     final shoppingComparison = ShoppingComparisonService(providers: providers);
 
