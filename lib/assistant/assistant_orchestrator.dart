@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'local_llama_gateway.dart';
+import 'shopping_text_parser.dart';
 import '../platform/ocr_gateway.dart';
 
 sealed class AssistantInput {
@@ -29,9 +30,13 @@ class FamilyActionDraft {
 }
 
 class AssistantOrchestrator {
-  const AssistantOrchestrator(this._llama);
+  const AssistantOrchestrator(
+    this._llama, {
+    ShoppingTextParser shoppingTextParser = const ShoppingTextParser(),
+  }) : _shoppingTextParser = shoppingTextParser;
 
   final LocalLlamaGateway _llama;
+  final ShoppingTextParser _shoppingTextParser;
 
   Future<FamilyActionDraft> propose(AssistantInput input) async {
     final now = DateTime.now();
@@ -64,6 +69,13 @@ class AssistantOrchestrator {
     String today,
     int weekday,
   ) async {
+    // Explicit shopping additions are deterministic. This prevents malformed
+    // or truncated model JSON from corrupting a multi-item shopping entry.
+    final deterministicShopping = _shoppingTextParser.tryBuildAddAction(inputText);
+    if (deterministicShopping != null) {
+      return FamilyActionDraft(rawJson: deterministicShopping);
+    }
+
     final intents = _intents(inputText);
     if (intents.schedule && !intents.shopping && !intents.todo) {
       final raw = await _llama.generate(
@@ -87,7 +99,9 @@ $inputLabel: $inputText
           weekday: weekday,
           intents: intents,
         ),
-        maxTokens: 80,
+        // 80 tokens was too small for multi-item actions and could truncate a
+        // valid JSON object. Keep enough headroom for structured responses.
+        maxTokens: 256,
         temperature: 0,
       ),
     );
@@ -148,7 +162,7 @@ $inputLabel: $inputText
         '課表', '課程', '上課', 'schedule', 'class', 'lesson', 'tomorrow', 'today',
       ]),
       shopping: _containsAny(lower, const [
-        '採購', '購物', '買', 'shopping', 'buy', 'purchase', 'milk',
+        '採購', '採買', '購物', '買', 'shopping', 'buy', 'purchase', 'milk',
       ]),
       todo: _containsAny(lower, const [
         '待辦', '提醒', 'todo', 'task', 'remember',
