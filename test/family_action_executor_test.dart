@@ -109,6 +109,25 @@ void main() {
     expect(result.message, contains('目前沒有購物項目'));
   });
 
+  test('invalid shopping batch writes nothing', () async {
+    await expectLater(
+      executor.execute(
+        const FamilyAction(
+          type: 'shopping.add',
+          requiresConfirmation: false,
+          payload: {
+            'items': [
+              {'name': '牛奶', 'quantity': 2, 'unit': '瓶', 'done': false},
+              {'name': '雞蛋', 'quantity': 0, 'unit': '盒', 'done': false},
+            ]
+          },
+        ),
+      ),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await shopping.list(includeDone: true), isEmpty);
+  });
+
   test('todo completion resolves persisted todo by title', () async {
     await executor.execute(
       const FamilyAction(
