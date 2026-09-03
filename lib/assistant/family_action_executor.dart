@@ -112,18 +112,24 @@ class FamilyActionExecutor {
     if (rawItems is! List || rawItems.isEmpty) {
       throw const FormatException('shopping.add payload.items is required.');
     }
-    var count = 0;
+
+    // Validate the entire batch before writing anything. Previously an invalid
+    // later item could throw after earlier items had already been persisted,
+    // leaving a partially-entered shopping list.
+    final items = <HouseholdShoppingItem>[];
     for (final raw in rawItems) {
       if (raw is! Map) throw const FormatException('shopping.add items must be objects.');
       final normalized = <String, Object?>{
         ...raw.map((key, value) => MapEntry(key.toString(), value)),
         'id': EntityIds.generate('shopping'),
       };
-      final item = HouseholdShoppingItem.fromJson(normalized);
-      await _shopping.add(item);
-      count++;
+      items.add(HouseholdShoppingItem.fromJson(normalized));
     }
-    return ActionExecutionResult(message: '已加入 $count 筆購物項目。');
+
+    for (final item in items) {
+      await _shopping.add(item);
+    }
+    return ActionExecutionResult(message: '已加入 ${items.length} 筆購物項目。');
   }
 
   Future<ActionExecutionResult> _shoppingList(FamilyAction action) async {
