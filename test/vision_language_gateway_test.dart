@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:householder/platform/vision_language_gateway.dart';
+import '../lib/platform/vision_language_gateway.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
