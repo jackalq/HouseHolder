@@ -1,0 +1,158 @@
+name: Android MVP CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Prepare stable Android signing
+        id: signing
+        shell: bash
+        env:
+          HOUSEHOLDER_ANDROID_KEYSTORE_BASE64: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_BASE64 }}
+          HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [[ -z "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" || -z "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Stable signing secrets are not configured."
+            exit 1
+          fi
+
+          printf '%s' "$HOUSEHOLDER_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/householder-release.p12"
+
+          EXPECTED_SHA256="3dd85c03b89e517c7d239ab24ad0a4d7500113a144a0dd6718cde21b142948de"
+          ACTUAL_SHA256=$(sha256sum "$RUNNER_TEMP/householder-release.p12" | awk '{print $1}')
+          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "::error::HOUSEHOLDER_ANDROID_KEYSTORE_BASE64 does not match the HouseHolder signing backup. Re-copy the entire keystore-base64.txt content into the repository secret."
+            exit 1
+          fi
+
+          PASSWORD=$(printf '%s' "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW" | tr -d '\r\n' | sed -E 's/^[[:space:]]*Value:[[:space:]]*//; s/[[:space:]]+$//')
+          if ! keytool -list -keystore "$RUNNER_TEMP/householder-release.p12" -storepass "$PASSWORD" -alias householder >/dev/null 2>&1; then
+            echo "::error::HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD does not unlock alias 'householder'. Re-copy only the password value from github-secrets.txt (without the 'Value:' label)."
+            exit 1
+          fi
+
+          echo "HOUSEHOLDER_KEYSTORE_PATH=$RUNNER_TEMP/householder-release.p12" >> "$GITHUB_ENV"
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build Android debug APK
+        shell: bash
+        env:
+          HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW: ${{ secrets.HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          PASSWORD=$(printf '%s' "$HOUSEHOLDER_ANDROID_KEYSTORE_PASSWORD_RAW" | tr -d '\r\n' | sed -E 's/^[[:space:]]*Value:[[:space:]]*//; s/[[:space:]]+$//')
+          HOUSEHOLDER_KEYSTORE_PASSWORD="$PASSWORD" flutter build apk --debug --build-number=${{ github.run_number }}
+
+      - name: Verify stable APK signature
+        shell: bash
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-debug.apk | tee signing-certificate.txt
+
+      - name: Upload Android debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: householder-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload updatable Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: householder-updatable-apk
+          path: |
+            build/app/outputs/flutter-apk/app-debug.apk
+            signing-certificate.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  emulator-smoke:
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Android debug APK
+        uses: actions/download-artifact@v4
+        with:
+          name: householder-debug-apk
+          path: apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and launch HouseHolder on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          disable-animations: true
+          script: |
+            mkdir -p emulator-artifacts
+            adb install -r apk/app-debug.apk | tee emulator-artifacts/adb-install.txt
+            adb logcat -c
+            adb shell am start -W -n com.householder.app/.MainActivity | tee emulator-artifacts/am-start.txt
+            sleep 5
+            adb logcat -d -v threadtime > emulator-artifacts/logcat.txt
+            adb exec-out screencap -p > emulator-artifacts/householder-home.png
+            adb shell pidof com.householder.app | tr -d '\r' | tee emulator-artifacts/pid.txt
+            test -s emulator-artifacts/pid.txt
+            adb shell dumpsys activity activities > emulator-artifacts/activity.txt
+            grep -Eq 'mResumedActivity.*com\.householder\.app|ResumedActivity.*com\.householder\.app|ACTIVITY com\.householder\.app/' emulator-artifacts/activity.txt
+            adb shell uiautomator dump /sdcard/householder-window.xml
+            adb pull /sdcard/householder-window.xml emulator-artifacts/householder-window.xml
+            ! grep -Eq 'FATAL EXCEPTION|Process: com\.householder\.app.*FATAL' emulator-artifacts/logcat.txt
+
+      - name: Upload emulator smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: householder-emulator-smoke
+          path: emulator-artifacts/
+          if-no-files-found: warn
+          retention-days: 14

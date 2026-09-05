@@ -1,0 +1,67 @@
+name: Android Emulator Smoke
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  emulator-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download last known-good APK artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p apk
+          gh run download 33301002913 -n householder-debug-apk -D apk
+          test -f apk/app-debug.apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and launch HouseHolder on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          disable-animations: true
+          script: |
+            mkdir -p emulator-artifacts
+            adb install -r apk/app-debug.apk | tee emulator-artifacts/adb-install.txt
+            adb logcat -c
+            adb shell am start -W -n com.householder.app/.MainActivity | tee emulator-artifacts/am-start.txt
+            sleep 5
+            adb logcat -d -v threadtime > emulator-artifacts/logcat.txt
+            adb exec-out screencap -p > emulator-artifacts/householder-home.png
+            adb shell pidof com.householder.app | tr -d '\r' | tee emulator-artifacts/pid.txt
+            test -s emulator-artifacts/pid.txt
+            adb shell dumpsys activity activities > emulator-artifacts/activity.txt
+            grep -Eq 'mResumedActivity.*com\.householder\.app|ResumedActivity.*com\.householder\.app|ACTIVITY com\.householder\.app/' emulator-artifacts/activity.txt
+            adb shell uiautomator dump /sdcard/householder-window.xml
+            adb pull /sdcard/householder-window.xml emulator-artifacts/householder-window.xml
+            ! grep -Eq 'FATAL EXCEPTION|Process: com\.householder\.app.*FATAL' emulator-artifacts/logcat.txt
+
+      - name: Upload emulator smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: householder-emulator-smoke
+          path: emulator-artifacts/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "householder://formats/family-action/v1",
+  "title": "HouseHolder FamilyAction",
+  "type": "object",
+  "required": ["type", "requiresConfirmation", "payload"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "schedule.import",
+        "schedule.query",
+        "shopping.add",
+        "shopping.list",
+        "shopping.setDone",
+        "todo.add",
+        "todo.list",
+        "todo.setDone",
+        "unsupported"
+      ]
+    },
+    "requiresConfirmation": {"type": "boolean"},
+    "payload": {"type": "object"}
+  },
+  "additionalProperties": false
+}
