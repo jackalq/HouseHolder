@@ -22,10 +22,8 @@ class VisionLanguageResult {
 
 /// Android-local multimodal inference entry point.
 ///
-/// The native implementation is intentionally separate from the text-only
-/// llama.android wrapper: Qwen3-VL requires llama.cpp libmtmd plus an mmproj
-/// vision encoder. Keeping this channel independent lets OCR remain a reliable
-/// fallback while the native vision runtime is installed/updated independently.
+/// Qwen3-VL uses llama.cpp libmtmd plus an mmproj vision encoder. This channel
+/// stays separate from the text-only runtime so OCR can remain a fallback.
 class VisionLanguageGateway {
   static const qwen3VlModelId = 'qwen3-vl-2b-instruct-q4_k_m';
   static const _channel = MethodChannel('householder/vision_language');
@@ -49,6 +47,7 @@ class VisionLanguageGateway {
       'prompt': prompt,
       'maxTokens': maxTokens,
       'temperature': temperature,
+      'modelId': qwen3VlModelId,
     });
     if (result == null) throw StateError('Android vision runtime returned no result.');
     return VisionLanguageResult.fromMap(result);
