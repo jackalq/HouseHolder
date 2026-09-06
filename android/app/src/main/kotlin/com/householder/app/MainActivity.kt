@@ -223,10 +223,14 @@ class MainActivity : FlutterActivity() {
         val image = try { InputImage.fromFilePath(this, Uri.fromFile(file)) } catch (error: Exception) { result.error("IMAGE_DECODE_FAILED", error.message, null); return }
         val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
         recognizer.process(image).addOnSuccessListener { text ->
-            fun token(value: String, box: android.graphics.Rect?) = mapOf("text" to value, "left" to box?.left?.toDouble(), "top" to box?.top?.toDouble(), "right" to box?.right?.toDouble(), "bottom" to box?.bottom?.toDouble())
-            val elements = text.textBlocks.flatMap { b -> b.lines.flatMap { l -> l.elements.map { e -> token(e.text, e.boundingBox) } } }
-            val lines = text.textBlocks.flatMap { b -> b.lines.map { l -> token(l.text, l.boundingBox) } }
-            val blocks = text.textBlocks.map { b -> token(b.text, b.boundingBox) }
+            fun geometryToken(value: String, box: android.graphics.Rect?) = mapOf("text" to value, "left" to box?.left?.toDouble(), "top" to box?.top?.toDouble(), "right" to box?.right?.toDouble(), "bottom" to box?.bottom?.toDouble())
+            val elements = text.textBlocks.flatMap { block ->
+                block.lines.flatMap { line ->
+                    line.elements.map { element -> geometryToken(element.text, element.boundingBox) }
+                }
+            }
+            val lines = text.textBlocks.flatMap { block -> block.lines.map { line -> geometryToken(line.text, line.boundingBox) } }
+            val blocks = text.textBlocks.map { block -> geometryToken(block.text, block.boundingBox) }
             result.success(mapOf("fullText" to text.text, "elements" to elements, "lines" to lines, "blocks" to blocks))
         }.addOnFailureListener { error -> result.error("OCR_FAILED", error.message, null) }.addOnCompleteListener { recognizer.close() }
     }
