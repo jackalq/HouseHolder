@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../platform/ocr_gateway.dart';
+import '../../platform/vision_language_gateway.dart';
+import 'qwen_timetable_parser.dart';
 import 'timetable_grid_parser.dart';
 
 class TimetableImportPage extends StatefulWidget {
@@ -14,6 +16,8 @@ class TimetableImportPage extends StatefulWidget {
 class _TimetableImportPageState extends State<TimetableImportPage> {
   final _picker = ImagePicker();
   final _ocr = OcrGateway();
+  final _vision = VisionLanguageGateway();
+  final _qwenParser = const QwenTimetableParser();
   final _gridParser = const TimetableGridParser();
   final _textController = TextEditingController();
   final _childController = TextEditingController();
@@ -25,6 +29,19 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
   TimetableGridResult? _grid;
   bool _busy = false;
   String? _error;
+  String? _recognizer;
+
+  static const _timetablePrompt = '''
+Read this Taiwanese elementary-school timetable image. Return JSON only, exactly:
+{"cells":[{"dayOfWeek":1,"period":1,"subject":"數學"}]}
+Rules:
+- dayOfWeek: Monday=1 through Friday=5 only.
+- period: class periods 1 through 7 only.
+- subject must be the course name, not teacher name, lunch, clothing, phone, note, date or heading.
+- Preserve Traditional Chinese course names. Normalize English/英文 to 英語.
+- Do not invent unreadable cells. Omit uncertain cells.
+- No markdown fences and no explanation.
+''';
 
   @override
   void dispose() {
@@ -36,32 +53,37 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
   }
 
   Future<void> _pick(ImageSource source) async {
-    setState(() {
-      _error = null;
-      _document = null;
-      _grid = null;
-    });
-
-    final image = await _picker.pickImage(
-      source: source,
-      imageQuality: 92,
-      maxWidth: 2400,
-    );
+    setState(() { _error = null; _document = null; _grid = null; _recognizer = null; });
+    final image = await _picker.pickImage(source: source, imageQuality: 92, maxWidth: 2400);
     if (image == null || !mounted) return;
-
-    setState(() {
-      _image = image;
-      _busy = true;
-    });
+    setState(() { _image = image; _busy = true; });
 
     try {
+      TimetableGridResult? qwenGrid;
+      try {
+        if (await _vision.isReady()) {
+          final result = await _vision.analyzeImage(
+            image.path,
+            prompt: _timetablePrompt,
+            maxTokens: 768,
+            temperature: 0.0,
+          );
+          qwenGrid = _qwenParser.parse(result.text);
+          if (qwenGrid != null) _recognizer = 'Qwen3-VL';
+        }
+      } catch (_) {
+        // Native multimodal runtime/model pack is optional. Fall through to
+        // deterministic ML Kit OCR geometry when it is unavailable or fails.
+      }
+
       final document = await _ocr.recognizeImage(image.path);
-      final grid = _gridParser.parse(document);
+      final grid = qwenGrid ?? _gridParser.parse(document);
       if (!mounted) return;
       _textController.text = document.fullText;
       setState(() {
         _document = document;
         _grid = grid;
+        _recognizer ??= 'ML Kit OCR';
       });
     } catch (error) {
       if (!mounted) return;
@@ -76,37 +98,20 @@ class _TimetableImportPageState extends State<TimetableImportPage> {
     final childId = _childController.text.trim();
     final validFrom = _validFromController.text.trim();
     final validUntilText = _validUntilController.text.trim();
+    if (text.isEmpty) { _showError('請先取得或輸入課表文字。'); return; }
+    if (childId.isEmpty) { _showError('請填寫這張課表屬於哪位孩子。'); return; }
+    if (!_isIsoDate(validFrom)) { _showError('請填寫有效起日，格式為 YYYY-MM-DD。'); return; }
+    if (validUntilText.isNotEmpty && !_isIsoDate(validUntilText)) { _showError('有效迄日格式必須是 YYYY-MM-DD。'); return; }
+    if (validUntilText.isNotEmpty && validUntilText.compareTo(validFrom) < 0) { _showError('有效迄日不能早於有效起日。'); return; }
 
-    if (text.isEmpty) {
-      _showError('請先取得或輸入課表文字。');
-      return;
-    }
-    if (childId.isEmpty) {
-      _showError('請填寫這張課表屬於哪位孩子。');
-      return;
-    }
-    if (!_isIsoDate(validFrom)) {
-      _showError('請填寫有效起日，格式為 YYYY-MM-DD。');
-      return;
-    }
-    if (validUntilText.isNotEmpty && !_isIsoDate(validUntilText)) {
-      _showError('有效迄日格式必須是 YYYY-MM-DD。');
-      return;
-    }
-    if (validUntilText.isNotEmpty && validUntilText.compareTo(validFrom) < 0) {
-      _showError('有效迄日不能早於有效起日。');
-      return;
-    }
-
-    final gridText = _grid?.usable == true
-        ? _grid!.toPromptText()
-        : 'STRUCTURED_TIMETABLE_GRID:\n(unavailable; use OCR cautiously)';
+    final gridText = _grid?.usable == true ? _grid!.toPromptText() : 'STRUCTURED_TIMETABLE_GRID:\n(unavailable; use OCR cautiously)';
     final reviewed = OcrDocument(
       fullText: '''
 HOUSEHOLDER_IMPORT_CONTEXT:
 childId=$childId
 validFrom=$validFrom
 validUntil=${validUntilText.isEmpty ? 'null' : validUntilText}
+recognizer=${_recognizer ?? 'unknown'}
 $gridText
 OCR_TEXT:
 $text
@@ -116,13 +121,8 @@ $text
     Navigator.of(context).pop(reviewed);
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  bool _isIsoDate(String value) =>
-      RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value) &&
-      DateTime.tryParse(value) != null;
+  void _showError(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  bool _isIsoDate(String value) => RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value) && DateTime.tryParse(value) != null;
 
   @override
   Widget build(BuildContext context) {
@@ -132,143 +132,40 @@ $text
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text(
-              '拍攝或選擇課表',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-            ),
+            const Text('拍攝或選擇課表', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
-            const Text('先用 OCR 座標還原星期 × 節次表格，再交給本機模型做文字修正；孩子與學期日期由你提供。'),
+            const Text('優先使用本機 Qwen3-VL 讀取課表；模型尚未安裝或辨識失敗時，自動退回 ML Kit OCR 座標解析。'),
             const SizedBox(height: 16),
-            TextField(
-              controller: _childController,
-              decoration: const InputDecoration(
-                labelText: '孩子 ID / 名稱 *',
-                hintText: '例如：小明',
-                border: OutlineInputBorder(),
-              ),
-            ),
+            TextField(controller: _childController, decoration: const InputDecoration(labelText: '孩子 ID / 名稱 *', hintText: '例如：小明', border: OutlineInputBorder())),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _validFromController,
-                    keyboardType: TextInputType.datetime,
-                    decoration: const InputDecoration(
-                      labelText: '有效起日 *',
-                      hintText: '2026-09-01',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _validUntilController,
-                    keyboardType: TextInputType.datetime,
-                    decoration: const InputDecoration(
-                      labelText: '有效迄日',
-                      hintText: '2027-01-20',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            Row(children: [
+              Expanded(child: TextField(controller: _validFromController, keyboardType: TextInputType.datetime, decoration: const InputDecoration(labelText: '有效起日 *', hintText: '2026-09-01', border: OutlineInputBorder()))),
+              const SizedBox(width: 12),
+              Expanded(child: TextField(controller: _validUntilController, keyboardType: TextInputType.datetime, decoration: const InputDecoration(labelText: '有效迄日', hintText: '2027-01-20', border: OutlineInputBorder()))),
+            ]),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _busy ? null : () => _pick(ImageSource.camera),
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    label: const Text('拍照'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: _busy ? null : () => _pick(ImageSource.gallery),
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('相簿'),
-                  ),
-                ),
-              ],
-            ),
-            if (_busy) ...[
-              const SizedBox(height: 18),
-              const LinearProgressIndicator(),
-              const SizedBox(height: 8),
-              const Text('正在辨識並還原課表格線…'),
-            ],
-            if (_image != null) ...[
-              const SizedBox(height: 18),
-              Text(
-                '圖片：${_image!.name}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 16),
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
+            Row(children: [
+              Expanded(child: FilledButton.icon(onPressed: _busy ? null : () => _pick(ImageSource.camera), icon: const Icon(Icons.camera_alt_outlined), label: const Text('拍照'))),
+              const SizedBox(width: 12),
+              Expanded(child: FilledButton.tonalIcon(onPressed: _busy ? null : () => _pick(ImageSource.gallery), icon: const Icon(Icons.photo_library_outlined), label: const Text('相簿'))),
+            ]),
+            if (_busy) ...[const SizedBox(height: 18), const LinearProgressIndicator(), const SizedBox(height: 8), const Text('正在辨識課表…')],
+            if (_image != null) ...[const SizedBox(height: 18), Text('圖片：${_image!.name}', maxLines: 1, overflow: TextOverflow.ellipsis)],
+            if (_recognizer != null) ...[const SizedBox(height: 8), Text('辨識引擎：$_recognizer')],
+            if (_error != null) ...[const SizedBox(height: 16), Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))],
             if (_grid != null) ...[
               const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _grid!.usable
-                            ? '表格定位：已找到 ${_grid!.cells.length} 個課程格'
-                            : '表格定位不足，將保留 OCR 文字供人工修正',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      if (_grid!.warnings.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(_grid!.warnings.join('；')),
-                      ],
-                      if (_grid!.usable) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          _grid!.cells
-                              .map((c) => '星期${c.dayOfWeek} 第${c.period}節 ${c.subject}')
-                              .join('\n'),
-                          key: const ValueKey('timetable-grid-preview'),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
+              Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(_grid!.usable ? '表格定位：已找到 ${_grid!.cells.length} 個課程格' : '表格定位不足，將保留 OCR 文字供人工修正', style: const TextStyle(fontWeight: FontWeight.w600)),
+                if (_grid!.warnings.isNotEmpty) ...[const SizedBox(height: 6), Text(_grid!.warnings.join('；'))],
+                if (_grid!.usable) ...[const SizedBox(height: 8), Text(_grid!.cells.map((c) => '星期${c.dayOfWeek} 第${c.period}節 ${c.subject}').join('\n'), key: const ValueKey('timetable-grid-preview'))],
+              ]))),
             ],
             const SizedBox(height: 20),
-            TextField(
-              controller: _textController,
-              minLines: 10,
-              maxLines: 20,
-              decoration: const InputDecoration(
-                labelText: 'OCR 原文（必要時可修正）',
-                alignLabelWithHint: true,
-                border: OutlineInputBorder(),
-              ),
-            ),
-            if (_document != null) ...[
-              const SizedBox(height: 8),
-              Text('辨識到 ${_document!.blocks.length} 個帶座標文字區塊'),
-            ],
+            TextField(controller: _textController, minLines: 10, maxLines: 20, decoration: const InputDecoration(labelText: 'OCR 原文（必要時可修正）', alignLabelWithHint: true, border: OutlineInputBorder())),
+            if (_document != null) ...[const SizedBox(height: 8), Text('辨識到 ${_document!.blocks.length} 個帶座標文字區塊')],
             const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: _busy ? null : _continueToParse,
-              icon: const Icon(Icons.arrow_forward),
-              label: const Text('確認並產生課表草稿'),
-            ),
+            FilledButton.icon(onPressed: _busy ? null : _continueToParse, icon: const Icon(Icons.arrow_forward), label: const Text('確認並產生課表草稿')),
           ],
         ),
       ),
