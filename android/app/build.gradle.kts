@@ -25,6 +25,11 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti")
+            }
+        }
     }
 
     val stableSigning = if (
@@ -50,16 +55,16 @@ android {
         }
     }
 
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     packaging {
         jniLibs {
-            // llama.android packages native llama.cpp libraries in the AAR.
             useLegacyPackaging = true
-
-            // The hosted Android x86_64 emulator advertises CPU features that make
-            // llama.cpp's release AAR select an optimized x86 backend, while the
-            // virtual CPU cannot safely execute that backend. For the UI inference
-            // smoke only, keep the generic x64 backend and remove optimized x86
-            // variants. Production arm64 APKs are unchanged.
             if (householderCiGenericX86) {
                 excludes += setOf(
                     "**/libggml-cpu-sse42.so",
@@ -89,14 +94,8 @@ flutter {
 }
 
 dependencies {
-    // Bundled OCR model: works without waiting for a Play Services download.
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
-
-    // Llama 3.2 .pte runtime.
     implementation("org.pytorch:executorch-android:1.3.1")
-
-    // GGUF/Qwen runtime. Pin the wrapper release so llama.cpp ABI/API changes do
-    // not silently change HouseHolder behavior.
     implementation("com.github.1opp0-org:llama.android:v0.0.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }
