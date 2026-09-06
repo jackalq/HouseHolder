@@ -1,0 +1,78 @@
+name: Android LLM UI Smoke
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  llm-ui-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Build current debug APK
+        env:
+          # GitHub's x86_64 Android VM misreports support for optimized ggml CPU
+          # variants. Force the smoke APK to retain only llama.cpp's generic x64
+          # backend; production arm64 packaging is unaffected.
+          HOUSEHOLDER_CI_GENERIC_X86: '1'
+        run: flutter build apk --debug --build-number=${{ github.run_number }}
+
+      - name: Download Qwen2.5 0.5B GGUF smoke model
+        run: |
+          mkdir -p smoke-model
+          curl -fL --retry 4 --retry-delay 5 \
+            -o smoke-model/qwen2.5-1.5b-instruct-q4_k_m.gguf \
+            https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
+          echo '74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db  smoke-model/qwen2.5-1.5b-instruct-q4_k_m.gguf' | sha256sum -c -
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run real UI inference smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: default
+          arch: x86_64
+          profile: pixel_5
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -memory 4096
+          disable-animations: true
+          script: sh tool/android_llm_ui_smoke.sh
+
+      - name: Upload LLM UI smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: householder-llm-ui-smoke
+          path: llm-ui-smoke-artifacts/
+          if-no-files-found: warn
+          retention-days: 14

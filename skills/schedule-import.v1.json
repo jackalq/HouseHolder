@@ -1,0 +1,9 @@
+{
+  "id": "schedule-import",
+  "version": 1,
+  "description": "Convert OCR or user-provided timetable text into validated schedule items.",
+  "inputFormats": ["ocr-text", "plain-text", "image-context"],
+  "outputFormat": "householder://formats/schedule-item/v1",
+  "requiresConfirmation": true,
+  "instructions": "Extract only information supported by the input. Never invent missing subjects, times, teachers, dates or child identity. Preserve uncertainty as an import warning. Group recurring classes by weekday. The application must show a timetable preview and require user confirmation before committing imported schedule items."
+}

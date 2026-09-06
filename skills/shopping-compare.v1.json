@@ -1,0 +1,9 @@
+{
+  "id": "shopping-compare",
+  "version": 1,
+  "description": "Compare grounded merchant offers for the household shopping list using deterministic shipping-aware basket optimization.",
+  "inputFormats": ["shopping-item", "householder://formats/merchant-offer/v1", "householder://formats/shopping-strategy/v1"],
+  "outputFormat": "shopping-comparison",
+  "requiresConfirmation": false,
+  "instructions": "Use a configured offer provider only to retrieve grounded current merchant offers and purchase URLs. Never calculate totals with the language model. The application must calculate item subtotal, shipping thresholds, merchant count and ranking deterministically. Never purchase, checkout or pay automatically. Reject restricted or age-inappropriate products."
+}

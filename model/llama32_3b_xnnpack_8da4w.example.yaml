@@ -1,0 +1,27 @@
+base:
+  model_class: llama3_2
+  checkpoint: /absolute/path/to/consolidated.00.pth
+  params: /absolute/path/to/params.json
+  tokenizer_path: /absolute/path/to/tokenizer.model
+  metadata: '{"get_bos_id":128000,"get_eos_ids":[128009,128001]}'
+
+model:
+  use_kv_cache: true
+  use_sdpa_with_kv_cache: true
+  dtype_override: fp32
+
+export:
+  max_seq_length: 1024
+  max_context_length: 1024
+  output_dir: ./householder-model-pack
+  output_name: llama32-3b-instruct.pte
+
+quantization:
+  qmode: 8da4w
+  group_size: 128
+  embedding_quantize: 4,32
+
+backend:
+  xnnpack:
+    enabled: true
+    extended_ops: true
